@@ -1,0 +1,12 @@
+[package]
+name = "ecstasy"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = ["reflexion"]
+
+[dependencies]
+reflexion = { path = "reflexion"}
+merging-iterator = "1.3.0"
+permutation = "0.4.1"
