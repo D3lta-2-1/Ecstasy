@@ -23,5 +23,7 @@ impl Component for Vel {
 #[test]
 fn test1() {
     let mut registry = RegistryHeader::new();
-    let _ = registry.new_entity((Pos{x: 0.0, y:0.0}, Vel{x: 0.0, y:0.0}));
+    let e = registry.new_entity((Pos{x: 0.0, y:0.0}, Vel{x: 0.0, y:0.0}));
+    println!("entity: {:?}", e);
+    println!("{:?}", registry);
 }

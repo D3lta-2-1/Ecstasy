@@ -42,6 +42,16 @@ pub struct Registry {
     component_bridge: ComponentIdentityBridge,
 }
 
+impl Debug for Registry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{} archetype stored", self.archetypes.len())?;
+        for archetype in &self.archetypes {
+            archetype.fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
 /// Design choices
 /// - components are entities, so you can add components to the components.
 /// - archetype columns are order to easy component move between them

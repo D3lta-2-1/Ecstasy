@@ -3,6 +3,7 @@ use crate::shared::id::{Component, Entity};
 use reflexion::erased::{DropLocation, ErasedMutPointer};
 use std::alloc::{Layout, handle_alloc_error};
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::iter::zip;
 
 /// structure in charge of storing data for a specific entity
@@ -11,6 +12,13 @@ pub struct Archetype {
     columns: Vec<ErasedMutPointer>,
     entities: Vec<Entity>,
     components_to_columns: HashMap<Entity, usize>, // maps component id to column index
+}
+
+impl Debug for Archetype {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "component header {:?}", self.components)?;
+        writeln!(f, "entity stored {:?}", self.len())
+    }
 }
 
 impl Archetype {

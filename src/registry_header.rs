@@ -47,6 +47,7 @@ impl<T: Component + TypeInfoProvider, U: Component + TypeInfoProvider> StaticBun
     }
 }
 
+#[derive(Debug)]
 pub struct RegistryHeader {
     registry: Registry,
 }
