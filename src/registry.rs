@@ -1,10 +1,9 @@
 use crate::archetype::Archetype;
 use crate::component_bridge::ComponentIdentityBridge;
 use crate::shared::id::{Component, ComponentIdentity, Entity};
-use reflexion::erased::DropLocation;
+use reflexion::erased::{DropLocation, ErasedRef};
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::iter;
 use std::iter::zip;
 
@@ -16,19 +15,6 @@ struct EntityLocation {
     entity_index: EntityIndex,
 }
 
-#[derive(Debug)]
-pub enum RegistryError {
-    EntityNotFound,
-}
-
-impl Display for RegistryError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self, f) //TODO: improve that
-    }
-}
-
-impl Error for RegistryError {}
-
 pub struct Registry {
     // used to generate unique entity ids
     entity_counter: u32, // TODO: introduce it recycling mechanism to avoid overflow
@@ -38,6 +24,10 @@ pub struct Registry {
     archetypes: Vec<Archetype>, // TODO: promote that as an abstract storage
     // allow us to find the archetype based on what components it contains
     components_set_to_archetype: HashMap<Vec<Component>, ArchetypeIndex>,
+    // where components are located, used for :
+    // - single component query with (component, archetypeID) query
+    // - matching archetype query using the second hash map as a set
+    component_location: HashMap<Component, HashMap<ArchetypeIndex, usize>>,
     // mapping between component type and id
     component_bridge: ComponentIdentityBridge,
 }
@@ -75,6 +65,7 @@ impl Registry {
             entities: HashMap::new(),
             archetypes,
             components_set_to_archetype,
+            component_location: HashMap::new(),
             component_bridge,
         }
     }
@@ -83,6 +74,10 @@ impl Registry {
         let entity = Entity(self.entity_counter);
         self.entity_counter += 1;
         entity
+    }
+
+    pub fn find_component(&self, component: &ComponentIdentity) -> Option<Entity> {
+        self.component_bridge.find_component(component)
     }
 
     pub fn find_or_register_component(&mut self, component: &ComponentIdentity) -> Entity {
@@ -96,14 +91,21 @@ impl Registry {
     }
 
     /// try to find an archetype that contains the components, if not found, create a new archetype with the components.
-    fn find_or_create_archetype(&mut self, mut components: Vec<Component>) -> ArchetypeIndex {
-        components.sort();
+    fn find_or_create_archetype(&mut self, components: Vec<Component>) -> ArchetypeIndex {
+        debug_assert!(components.is_sorted());
         let archetype_index = self.components_set_to_archetype.get(&components);
         if let Some(index) = archetype_index {
             return *index;
         }
         let new_archetype = Archetype::new(components.clone(), &self.component_bridge);
         let archetype_index = self.archetypes.len();
+        for (i, component) in components.iter().enumerate() {
+            self.component_location
+                .entry(*component)
+                .or_insert(HashMap::new())
+                .insert(archetype_index, i);
+        }
+
         self.archetypes.push(new_archetype);
         self.components_set_to_archetype
             .insert(components, archetype_index);
@@ -143,8 +145,22 @@ impl Registry {
         let archetype = self.find_or_create_archetype(component.into());
         let entity_index =
             self.archetypes[archetype].push(entity, zip(component.iter().cloned(), values));
-        self.update_location(entity, Self::NO_COMPONENT_ARCHETYPE, entity_index);
+        self.update_location(entity, archetype, entity_index);
         entity
+    }
+
+    pub fn get_one_component<'a>(
+        &'a self,
+        entity: Entity,
+        component: Component,
+    ) -> Option<ErasedRef<'a>> {
+        let EntityLocation {
+            archetype_index,
+            entity_index,
+        } = self.entities.get(&entity)?.clone();
+        let map = self.component_location.get(&component)?;
+        let column = map.get(&archetype_index)?.clone();
+        Some(self.archetypes[archetype_index].ref_at(column, entity_index))
     }
 
     /*pub fn add_component_to_entity(

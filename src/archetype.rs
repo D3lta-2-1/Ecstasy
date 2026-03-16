@@ -1,8 +1,7 @@
 use crate::component_bridge::ComponentIdentityBridge;
 use crate::shared::id::{Component, Entity};
-use reflexion::erased::{DropLocation, ErasedMutPointer};
+use reflexion::erased::{DropLocation, ErasedMutPointer, ErasedRef};
 use std::alloc::{Layout, handle_alloc_error};
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
 
@@ -11,7 +10,6 @@ pub struct Archetype {
     components: Vec<Component>, // column_descriptor must be sorted
     columns: Vec<ErasedMutPointer>,
     entities: Vec<Entity>,
-    components_to_columns: HashMap<Entity, usize>, // maps component id to column index
 }
 
 impl Debug for Archetype {
@@ -24,7 +22,7 @@ impl Debug for Archetype {
 impl Archetype {
     /// build a new archetype from a set of Column, the components needs to be sorted
     pub fn new(components: Vec<Entity>, component_bridge: &ComponentIdentityBridge) -> Self {
-        assert!(components.is_sorted(), "components needs to be sorted...");
+        debug_assert!(components.is_sorted(), "components needs to be sorted...");
         let columns: Vec<_> = components
             .iter()
             .map(|component| {
@@ -33,25 +31,17 @@ impl Archetype {
             })
             .collect();
 
-        let components_to_columns: HashMap<_, _> = components
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, component)| (component, i))
-            .collect();
-
         Archetype {
             entities: Vec::new(),
             columns,
             components,
-            components_to_columns,
         }
     }
 
     /// Return all components ids stored in the archetype.
-    pub fn get_descriptor(&self) -> &Vec<Component> {
+    /*pub fn get_descriptor(&self) -> &Vec<Component> {
         &self.components
-    }
+    }*/
 
     pub fn len(&self) -> usize {
         self.entities.len()
@@ -63,6 +53,7 @@ impl Archetype {
 
     fn grow_columns(&mut self, additional: usize) {
         let new_size = self.capacity() + additional;
+        println!("archetype growing to capacity {new_size}");
         unsafe {
             for columm in self.columns.iter_mut() {
                 if columm.is_null() {
@@ -96,7 +87,7 @@ impl Archetype {
             "try to push with the wrong amount of components"
         );
         if self.len() == self.capacity() {
-            self.grow_columns(self.capacity())
+            self.grow_columns(self.capacity().max(4))
         }
 
         let location = self.len();
@@ -114,9 +105,27 @@ impl Archetype {
         location
     }
 
+    pub fn ref_at<'a>(&'a self, column: usize, index: usize) -> ErasedRef<'a> {
+        assert!(index < self.len(), "out of range");
+        unsafe { self.columns[column].offset(index).as_erased_ref::<'a>() }
+    }
+
     /// return an iterator containing all removed components
-    pub fn swap_remove(&mut self, location: usize) -> RemoveIterator {
-        RemoveIterator::new(self, location)
+    pub fn swap_remove<'a>(&'a mut self, location: usize) -> RemoveIterator<'a> {
+        RemoveIterator::<'a>::new(self, location)
+    }
+}
+
+impl Drop for Archetype {
+    fn drop(&mut self) {
+        unsafe {
+            for column in self.columns.iter().cloned() {
+                for i in 0..self.len() {
+                    column.offset(i).drop_in_place();
+                }
+                column.deallocate(self.capacity());
+            }
+        }
     }
 }
 

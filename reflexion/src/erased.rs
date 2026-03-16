@@ -174,7 +174,7 @@ impl<'a> ErasedRef<'a> {
     /// Safety : this function will compare the layouts of the objects and panic if they don't match
     /// It's up to the user to cast back to the right type
     /// However, this abstraction assume that the pointed value is in a valid state.
-    pub fn as_ref<T: Sized>(&self) -> &T {
+    pub fn cast<T: Sized>(self) -> &'a T {
         assert_eq!(
             self.type_info,
             T::TYPE_INFO,
@@ -209,21 +209,7 @@ impl<'a> ErasedMut<'a> {
     /// Safety, this function will compare the layouts of the objects and panic if they don't match
     /// It's up to the user to cast back to the right type
     /// However, this abstraction assume that the pointed value is in a valid state.
-    pub fn as_ref<T: Sized>(&mut self) -> &T {
-        assert_eq!(
-            self.type_info,
-            T::TYPE_INFO,
-            "Type mismatch: expected {:?}, found {:?}",
-            self.type_info,
-            T::TYPE_INFO
-        );
-        unsafe { &*(self.data as *const T) }
-    }
-
-    /// Safety, this function will compare the layouts of the objects and panic if they don't match
-    /// It's up to the user to cast back to the right type
-    /// However, this abstraction assume that the pointed value is in a valid state.
-    pub fn as_mut<T: Sized>(&mut self) -> &mut T {
+    pub fn cast<T: Sized>(self) -> &'a mut T {
         assert_eq!(
             self.type_info,
             T::TYPE_INFO,

@@ -6,6 +6,6 @@ fn erased() {
     unsafe {
         let ptr = ErasedMutPointer::from_mut(&mut value);
         let cst_ref = ptr.as_erased_ref();
-        assert_eq!(*cst_ref.as_ref::<i32>(), 25);
+        assert_eq!(*cst_ref.cast::<i32>(), 25);
     }
 }

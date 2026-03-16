@@ -1,5 +1,6 @@
 use crate::registry::Registry;
 use crate::shared::id::{ComponentIdentity, Entity};
+use paste::paste;
 use reflexion::erased::DropLocation;
 use reflexion::typeinfo::TypeInfoProvider;
 use std::mem;
@@ -9,43 +10,71 @@ use std::mem;
 /// each binary accessing the ECS across DLL boundaries will get a copy of all this code and data structure
 /// it's the perfect place to some target local caching such as type_id <-> component identity
 
-pub trait Component {
+pub trait Component: TypeInfoProvider {
     const PATH: &'static str;
     const NAME: &'static str;
+    const IDENTITY: ComponentIdentity = ComponentIdentity {
+        path: Self::PATH,
+        name: Self::NAME,
+        type_info: Self::TYPE_INFO,
+    };
 }
 
-//TODO: implement bundle for any size
 pub trait StaticBundle<const SIZE: usize> {
     const IDENTITIES: [ComponentIdentity; SIZE];
-    fn read(self, reader: impl FnOnce([DropLocation; SIZE]) -> Entity) -> Entity;
+    fn read<T>(self, reader: impl FnOnce([DropLocation; SIZE]) -> T) -> T;
 }
 
-impl<T: Component + TypeInfoProvider, U: Component + TypeInfoProvider> StaticBundle<2> for (T, U) {
-    const IDENTITIES: [ComponentIdentity; 2] = [
-        ComponentIdentity {
-            path: T::PATH,
-            name: T::NAME,
-            type_info: T::TYPE_INFO,
-        },
-        ComponentIdentity {
-            path: U::PATH,
-            name: U::NAME,
-            type_info: U::TYPE_INFO,
-        },
-    ];
+impl<T: Component> StaticBundle<1> for T {
+    const IDENTITIES: [ComponentIdentity; 1] = [T::IDENTITY];
 
-    fn read(mut self, reader: impl FnOnce([DropLocation; 2]) -> Entity) -> Entity {
+    fn read<RETURN>(mut self, reader: impl FnOnce([DropLocation; 1]) -> RETURN) -> RETURN {
         let locations = unsafe {
-            [
-                DropLocation::at_hard(&mut self.0),
-                DropLocation::at_hard(&mut self.1),
-            ]
+            [ DropLocation::at_hard(&mut self) ]
         };
-        let e = reader(locations);
+        let r = reader(locations);
         mem::forget(self);
-        e
+        r
     }
 }
+
+macro_rules! count_tts {
+    () => {0usize};
+    ($_head:tt $($tail:tt)*) => {1usize + count_tts!($($tail)*)};
+}
+macro_rules! impl_bundle {
+    ($($T:tt)+) => {
+        paste! {
+            impl<$($T : Component,)+> StaticBundle<{ count_tts!($($T)+) }> for ($($T,)+) {
+                const IDENTITIES: [ComponentIdentity; count_tts!($($T)+)] = [ $($T::IDENTITY,)+ ];
+                fn read<RETURN>(self, reader: impl FnOnce([DropLocation; count_tts!($($T)+)]) -> RETURN) -> RETURN {
+                    let ($(mut [<$T:lower>],)+) = self;
+                    let locations = unsafe { [
+                       $(DropLocation::at_hard(&mut [<$T:lower>]),)+
+                    ] };
+                    let r = reader(locations);
+                    $(
+                    mem::forget([<$T:lower>]);
+                    )+
+                    r
+                }
+            }
+        }
+    };
+}
+
+impl_bundle!(A);
+impl_bundle!(A B);
+impl_bundle!(A B C);
+impl_bundle!(A B C D);
+impl_bundle!(A B C D E);
+impl_bundle!(A B C D E F);
+impl_bundle!(A B C D E F G);
+impl_bundle!(A B C D E F G H);
+impl_bundle!(A B C D E F G H I);
+impl_bundle!(A B C D E F G H I J);
+impl_bundle!(A B C D E F G H I J K);
+impl_bundle!(A B C D E F G H I J K L);
 
 #[derive(Debug)]
 pub struct RegistryHeader {
@@ -71,5 +100,12 @@ impl RegistryHeader {
             self.registry
                 .create_entity(&component, locations.into_iter())
         })
+    }
+
+    pub fn get_single<T: Component>(&self, entity: Entity) -> Option<&T> {
+        let component = self.registry.find_component(&T::IDENTITY)?;
+        self.registry
+            .get_one_component(entity, component)
+            .map(|c| c.cast::<T>())
     }
 }
