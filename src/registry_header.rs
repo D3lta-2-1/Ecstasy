@@ -29,9 +29,7 @@ impl<T: Component> StaticBundle<1> for T {
     const IDENTITIES: [ComponentIdentity; 1] = [T::IDENTITY];
 
     fn read<RETURN>(mut self, reader: impl FnOnce([DropLocation; 1]) -> RETURN) -> RETURN {
-        let locations = unsafe {
-            [ DropLocation::at_hard(&mut self) ]
-        };
+        let locations = unsafe { [DropLocation::at_hard(&mut self)] };
         let r = reader(locations);
         mem::forget(self);
         r
@@ -89,16 +87,31 @@ impl RegistryHeader {
     }
 
     pub fn new_entity<const SIZE: usize, T: StaticBundle<SIZE>>(&mut self, bundle: T) -> Entity {
-        let mut component: Vec<_> = T::IDENTITIES
-            .iter()
-            .map(|c| self.registry.find_or_register_component(c))
-            .collect();
+        let mut component: [Entity; SIZE] =
+            std::array::from_fn(|i| self.registry.find_or_register_component(&T::IDENTITIES[i]));
         let mut permutation = permutation::sort(&component); //this permutation could be stored to spare some calculation...
         bundle.read(|mut locations| {
             permutation.apply_slice_in_place(&mut component);
             permutation.apply_slice_in_place(&mut locations);
             self.registry
                 .create_entity(&component, locations.into_iter())
+        })
+    }
+
+    pub fn add<const SIZE: usize, T: StaticBundle<SIZE>>(
+        &mut self,
+        entity: Entity,
+        bundle: T,
+    ) -> Option<()> {
+        let mut component: [Entity; SIZE] =
+            std::array::from_fn(|i| self.registry.find_or_register_component(&T::IDENTITIES[i]));
+
+        let mut permutation = permutation::sort(&component); //this permutation could be stored to spare some calculation...
+        bundle.read(|mut locations| {
+            permutation.apply_slice_in_place(&mut component);
+            permutation.apply_slice_in_place(&mut locations);
+            self.registry
+                .add_components(entity, &component, locations.into_iter())
         })
     }
 

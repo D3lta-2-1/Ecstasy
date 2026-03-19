@@ -1,6 +1,6 @@
 use crate::component_bridge::ComponentIdentityBridge;
 use crate::shared::id::{Component, Entity};
-use reflexion::erased::{DropLocation, ErasedMutPointer, ErasedRef};
+use reflexion::erased::{DropLocation, ErasedMut, ErasedMutPointer, ErasedRef};
 use std::alloc::{Layout, handle_alloc_error};
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
@@ -39,9 +39,9 @@ impl Archetype {
     }
 
     /// Return all components ids stored in the archetype.
-    /*pub fn get_descriptor(&self) -> &Vec<Component> {
+    pub fn get_descriptor(&self) -> &[Component] {
         &self.components
-    }*/
+    }
 
     pub fn len(&self) -> usize {
         self.entities.len()
@@ -53,7 +53,6 @@ impl Archetype {
 
     fn grow_columns(&mut self, additional: usize) {
         let new_size = self.capacity() + additional;
-        println!("archetype growing to capacity {new_size}");
         unsafe {
             for columm in self.columns.iter_mut() {
                 if columm.is_null() {
@@ -79,13 +78,8 @@ impl Archetype {
     pub fn push<'a>(
         &mut self,
         id: Entity,
-        components: impl ExactSizeIterator<Item = (Component, DropLocation<'a>)>,
-    ) -> usize {
-        assert_eq!(
-            components.len(),
-            self.components.len(),
-            "try to push with the wrong amount of components"
-        );
+        components: impl Iterator<Item = (Component, DropLocation<'a>)>,
+    ) -> Result<usize, ArchetypeError> {
         if self.len() == self.capacity() {
             self.grow_columns(self.capacity().max(4))
         }
@@ -94,20 +88,32 @@ impl Archetype {
         let columns = zip(self.components.iter().cloned(), self.columns.iter_mut());
 
         //the Component information is useless here, but at least it can guaranty that things went smoothly
-        for ((given_component, value), (expected_component, column)) in zip(components, columns) {
-            assert_eq!(given_component, expected_component, "wrong component found");
-            //TODO: return a result depending weather or not the push was a success instead of a crash ?
+        for (i, ((given_component, value), (expected_component, column))) in
+            zip(components, columns).enumerate()
+        {
+            if given_component != expected_component {
+                // drop any failed init...
+                for column in self.columns[0..i].iter().cloned() {
+                    unsafe { column.offset(location).drop_in_place() }
+                }
+                return Err(ArchetypeError::InsertionFailed);
+            }
             unsafe {
                 column.offset(location).write_drop_location(value);
             }
         }
         self.entities.push(id);
-        location
+        Ok(location)
     }
 
-    pub fn ref_at<'a>(&'a self, column: usize, index: usize) -> ErasedRef<'a> {
+pub fn ref_at<'a>(&'a self, column: usize, index: usize) -> ErasedRef<'a> {
         assert!(index < self.len(), "out of range");
         unsafe { self.columns[column].offset(index).as_erased_ref::<'a>() }
+    }
+
+    pub fn mut_at<'a>(&'a mut self, column: usize, index: usize) -> ErasedMut<'a> {
+        assert!(index < self.len(), "out of range");
+        unsafe { self.columns[column].offset(index).as_erased_mut::<'a>() }
     }
 
     /// return an iterator containing all removed components
@@ -146,7 +152,11 @@ impl<'a> RemoveIterator<'a> {
 
     ///return which entity is being moved, and where it will end up
     pub fn moved_entity(&self) -> Option<(Entity, usize)> {
-        self.archetype.entities.last().map(|e| (*e, self.location))
+        if self.archetype.len() > 1 {
+            self.archetype.entities.last().map(|e| (*e, self.location))
+        } else {
+            None
+        }
     }
 }
 
@@ -158,13 +168,15 @@ impl<'a> Iterator for RemoveIterator<'a> {
             return None;
         }
 
-        unsafe {
+        let value = unsafe {
             let location = self.archetype.columns[self.i].offset(self.location);
-            Some((
+            (
                 self.archetype.components[self.i],
                 DropLocation::at(location),
-            ))
-        }
+            )
+        };
+        self.i += 1;
+        Some(value)
     }
 }
 
@@ -189,4 +201,9 @@ impl<'a> Drop for RemoveIterator<'a> {
         }
         self.archetype.entities.swap_remove(self.location);
     }
+}
+
+#[derive(Debug)]
+pub enum ArchetypeError {
+    InsertionFailed,
 }

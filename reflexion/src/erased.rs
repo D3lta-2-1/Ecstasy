@@ -145,28 +145,25 @@ impl ErasedMutPointer {
     /// build a reference, the lifetime should be provided by the caller
     pub unsafe fn as_erased_ref<'a>(self) -> ErasedRef<'a> {
         ErasedRef {
-            data: self.data,
-            type_info: self.type_info,
+            ptr: self,
             _phantom: PhantomData,
         }
     }
 
     /// build a reference, the lifetime should be provided by the caller
-    pub unsafe fn as_erased_mut<'a>(&self) -> ErasedMut<'a> {
+    pub unsafe fn as_erased_mut<'a>(self) -> ErasedMut<'a> {
         ErasedMut {
-            data: self.data,
-            type_info: self.type_info,
+            ptr: self,
             _phantom: PhantomData,
         }
     }
 }
 
 /// a reference for ErasedDataType
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct ErasedRef<'a> {
-    data: *const u8,
-    type_info: TypeInfo,
+    ptr: ErasedMutPointer,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -176,30 +173,28 @@ impl<'a> ErasedRef<'a> {
     /// However, this abstraction assume that the pointed value is in a valid state.
     pub fn cast<T: Sized>(self) -> &'a T {
         assert_eq!(
-            self.type_info,
+            self.ptr.type_info,
             T::TYPE_INFO,
             "Type mismatch: expected {:?}, found {:?}",
-            self.type_info,
+            self.ptr.type_info,
             T::TYPE_INFO
         );
-        unsafe { &*(self.data as *const T) }
+        unsafe { &*(self.ptr.data as *const T) }
     }
 }
 
 /// a mutable reference for ErasedDataType
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Debug)]
 pub struct ErasedMut<'a> {
-    data: *const u8,
-    type_info: TypeInfo,
+    ptr: ErasedMutPointer,
     _phantom: PhantomData<&'a mut ()>,
 }
 
 impl<'a> From<ErasedMut<'a>> for ErasedRef<'a> {
     fn from(value: ErasedMut) -> Self {
         ErasedRef {
-            data: value.data,
-            type_info: value.type_info,
+            ptr: value.ptr,
             _phantom: PhantomData,
         }
     }
@@ -211,13 +206,21 @@ impl<'a> ErasedMut<'a> {
     /// However, this abstraction assume that the pointed value is in a valid state.
     pub fn cast<T: Sized>(self) -> &'a mut T {
         assert_eq!(
-            self.type_info,
+            self.ptr.type_info,
             T::TYPE_INFO,
             "Type mismatch: expected {:?}, found {:?}",
-            self.type_info,
+            self.ptr.type_info,
             T::TYPE_INFO
         );
-        unsafe { &mut *(self.data as *mut T) }
+        unsafe { &mut *(self.ptr.data as *mut T) }
+    }
+
+    /// replace the contained value with
+    pub fn write(&mut self, drop_location: DropLocation) {
+        unsafe {
+            self.ptr.drop_in_place();
+            self.ptr.write_drop_location(drop_location);
+        }
     }
 }
 
