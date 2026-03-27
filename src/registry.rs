@@ -1,46 +1,32 @@
-use crate::archetype::Archetype;
-use crate::component_bridge::ComponentIdentityBridge;
-use crate::merge_iter::MergeIter;
-use crate::shared::id::{Component, ComponentIdentity, Entity};
+mod archetype;
+mod archetype_manager;
+mod component_bridge;
+mod entity_manager;
+mod merge_iter;
+
+use crate::registry::entity_manager::{EntityLocation, EntityManager};
+use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use component_bridge::ComponentIdentityBridge;
+use merge_iter::MergeIter;
 use reflexion::erased::{DropLocation, ErasedRef};
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
 use std::iter;
 use std::iter::zip;
+use crate::registry::archetype_manager::ArchetypeManager;
 
 pub type ArchetypeIndex = usize;
 pub type EntityIndex = usize;
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct EntityLocation {
-    archetype_index: ArchetypeIndex,
-    entity_index: EntityIndex,
+pub type ColumnIndex = usize;
+
+pub(crate) struct MovedEntity {
+    entity: Entity,
+    new_location: EntityLocation
 }
+
 
 pub struct Registry {
-    // used to generate unique entity ids
-    entity_counter: u32, // TODO: introduce it recycling mechanism to avoid overflow
     // where each entity is located in the registry
-    entities: HashMap<Entity, EntityLocation>, // TODO: update that to a sparse set
-    // store the archetypes, each archetype is a collection of entities with the same components
-    archetypes: Vec<Archetype>, // TODO: promote that as an abstract storage
-    // allow us to find the archetype based on what components it contains
-    components_set_to_archetype: HashMap<Vec<Component>, ArchetypeIndex>,
-    // where components are located, used for :
-    // - single component query with (component, archetypeID) query
-    // - matching archetype query using the second hash map as a set
-    component_location: HashMap<Component, HashMap<ArchetypeIndex, usize>>,
-    // mapping between component type and id
-    component_bridge: ComponentIdentityBridge,
-}
-
-impl Debug for Registry {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{} archetype stored", self.archetypes.len())?;
-        for archetype in &self.archetypes {
-            archetype.fmt(f)?;
-        }
-        Ok(())
-    }
+    entities: EntityManager,
+    archetypes: ArchetypeManager,
 }
 
 /// Design choices
@@ -49,98 +35,34 @@ impl Debug for Registry {
 /// - For now, entities stay anonymous, we don't store their names or paths.
 /// all function exposed by the registry should be ABI safe. It's not the case now, but that mean NO GENERIC can be used here
 impl Registry {
-    const NO_COMPONENT_ARCHETYPE: ArchetypeIndex = 0;
-
     pub fn new() -> Self {
         let component_bridge = ComponentIdentityBridge::default();
-        let components_set_to_archetype = HashMap::from([
-            (vec![], Self::NO_COMPONENT_ARCHETYPE), // no component archetype
-        ]);
-
-        let archetypes = vec![
-            Archetype::new(vec![], &component_bridge), // no component archetype
-        ];
-
         Registry {
-            entity_counter: 0,
-            entities: HashMap::new(),
-            archetypes,
-            components_set_to_archetype,
-            component_location: HashMap::new(),
-            component_bridge,
+            entities: EntityManager::default(),
+            archetypes: ArchetypeManager::new(),
         }
     }
 
-    fn new_entity_id(&mut self) -> Entity {
-        let entity = Entity(self.entity_counter);
-        self.entity_counter += 1;
-        entity
-    }
-
-    pub fn find_component(&self, component: &ComponentIdentity) -> Option<Entity> {
-        self.component_bridge.find_component(component)
-    }
-
-    pub fn find_or_register_component(&mut self, component: &ComponentIdentity) -> Entity {
-        if let Some(e) = self.component_bridge.find_component(component) {
+    pub fn find_or_register_component(&mut self, component: &ComponentDescriptor) -> Entity {
+        if let Some(e) = self.archetypes.find_component(&component.identity) {
             e
         } else {
-            let e = self.create_empty_entity();
-            self.component_bridge.add(*component, e);
+            let e = self.create_empty_permanent_entity();
+            self.archetypes.add_new_component_mapping(*component, e);
             e
         }
-    }
-
-    /// try to find an archetype that contains the components, if not found, create a new archetype with the components.
-    fn find_or_create_archetype(&mut self, components: Vec<Component>) -> ArchetypeIndex {
-        debug_assert!(components.is_sorted());
-        let archetype_index = self.components_set_to_archetype.get(&components);
-        if let Some(index) = archetype_index {
-            return *index;
-        }
-        let new_archetype = Archetype::new(components.clone(), &self.component_bridge);
-        let archetype_index = self.archetypes.len();
-        for (i, component) in components.iter().enumerate() {
-            self.component_location
-                .entry(*component)
-                .or_insert(HashMap::new())
-                .insert(archetype_index, i);
-        }
-
-        self.archetypes.push(new_archetype);
-        self.components_set_to_archetype
-            .insert(components, archetype_index);
-        archetype_index
-    }
-
-    fn update_location(
-        // TODO: remove that when proper Entity location map will be added
-        entities: &mut HashMap<Entity, EntityLocation>,
-        entity: Entity,
-        archetype_index: ArchetypeIndex,
-        entity_index: EntityIndex,
-    ) {
-        entities.insert(
-            entity,
-            EntityLocation {
-                archetype_index,
-                entity_index,
-            },
-        );
     }
 
     pub fn create_empty_entity(&mut self) -> Entity {
-        let entity = self.new_entity_id();
-        let entity_index = self.archetypes[Self::NO_COMPONENT_ARCHETYPE]
-            .push(entity, iter::empty())
-            .expect("insertion failed");
-        Self::update_location(
-            &mut self.entities,
-            entity,
-            Self::NO_COMPONENT_ARCHETYPE,
-            entity_index,
-        );
-        entity
+        self.entities.allocate(|entity| {
+            self.archetypes.push(ArchetypeManager::NO_COMPONENT_ARCHETYPE, entity, iter::empty())
+        })
+    }
+
+    pub fn create_empty_permanent_entity(&mut self) -> Entity {
+        self.entities.allocate_permanent(|entity| {
+            self.archetypes.push(ArchetypeManager::NO_COMPONENT_ARCHETYPE, entity, iter::empty())
+        })
     }
 
     //TODO: Remove the genric used here and make that iterator ABI-safe
@@ -156,13 +78,10 @@ impl Registry {
             "components must be different"
         );
 
-        let entity = self.new_entity_id();
-        let archetype = self.find_or_create_archetype(components.into());
-        let entity_index = self.archetypes[archetype]
-            .push(entity, zip(components.iter().cloned(), values))
-            .expect("insertion failed");
-        Self::update_location(&mut self.entities, entity, archetype, entity_index);
-        entity
+        let archetype_index = self.archetypes.find_or_create_archetype(components.into());
+        self.entities.allocate(|entity| {
+            self.archetypes.push(archetype_index, entity, zip(components.iter().cloned(), values))
+        })
     }
 
     pub fn add_components<'s: 'a, 'a>(
@@ -170,7 +89,7 @@ impl Registry {
         entity: Entity,
         components: &[Component],
         values: impl ExactSizeIterator<Item = DropLocation<'a>>,
-    ) -> Option<()> {
+    ) -> Result<(), ()> { //todo add proper error handling
         assert!(
             components
                 .windows(2)
@@ -179,85 +98,93 @@ impl Registry {
         );
         assert!(components.len() > 0);
 
-        let EntityLocation {
-            archetype_index: src_archetype_index,
-            entity_index,
-        } = *self.entities.get(&entity)?;
-        let base_component = self.archetypes[src_archetype_index].get_descriptor();
+        let src_location = self.entities.get(entity).ok_or(())?;
+        let src_archetype_index= src_location.archetype_index;
+
+        let base_component = self.archetypes.get_archetype(src_archetype_index).get_descriptor();
         let dst_header: Vec<_> = MergeIter::new(base_component, components)
             .cloned()
             .collect();
 
-        let dst_archetype_index = self.find_or_create_archetype(dst_header);
+        let dst_archetype_index = self.archetypes.find_or_create_archetype(dst_header);
 
         if src_archetype_index != dst_archetype_index {
-            self.move_entity(entity, entity_index, src_archetype_index, dst_archetype_index, components, values)
-        } else {
-            let archetype = &mut self.archetypes[dst_archetype_index];
-            for (component, value) in zip(components, values) {
-                // the archetype already exist, because the entity is already in, so both of these operations are safe
-                let column = self.component_location.get(component).unwrap().get(&dst_archetype_index).unwrap();
-                archetype.mut_at(*column, entity_index).write(value);
-            }
-            Some(())
-        }
-    }
-
-    fn move_entity<'s: 'a, 'a>(
-        &'s mut self,
-        entity: Entity,
-        entity_index: usize,
-        src_archetype_index: usize,
-        dst_archetype_index: usize,
-        components: &[Component],
-        values: impl ExactSizeIterator<Item = DropLocation<'a>>,
-    ) -> Option<()> {
-        let [src_archetype, dst_archetype] = self
-            .archetypes
-            .get_disjoint_mut([src_archetype_index, dst_archetype_index])
-            .unwrap(); //TODO: add support for component overwrite only
-
-        let actual_values = src_archetype.swap_remove(entity_index);
-        let new_value_iter = zip(components.iter().cloned(), values);
-        let moved_entity = actual_values.moved_entity();
-
-        let values =
-            MergeIter::with_custom_ordering(new_value_iter, actual_values, |(c1, _), (c2, _)| {
-                c1.cmp(c2)
-            });
-
-        let new_location = dst_archetype
-            .push(entity, values.into_iter())
-            .expect("insertion failed");
-
-        Self::update_location(
-            &mut self.entities,
-            entity,
-            dst_archetype_index,
-            new_location,
-        );
-        if let Some((moved_entity, new_location)) = moved_entity {
-            Self::update_location(
-                &mut self.entities,
-                moved_entity,
-                src_archetype_index,
-                new_location,
+            let (mov1, mov2) = self.archetypes.move_entity(
+                entity,
+                src_location,
+                dst_archetype_index,
+                components,
+                values,
             );
+            self.entities.update_location(mov1);
+            if let Some (mov2) = mov2 {
+                self.entities.update_location(mov2)
+            };
+        } else {
+            self.archetypes.set_components(src_location, zip(components.iter().cloned(), values))
         }
-        Some(())
+        Ok(())
     }
 
-pub fn get_one_component<'a>(
-        &'a self,
+    pub fn get_one_component(
+        &self,
         entity: Entity,
-        component: Component,
-    ) -> Option<ErasedRef<'a>> {
-        let EntityLocation {
-            archetype_index,
-            entity_index,
-        } = self.entities.get(&entity)?.clone();
-        let map = self.component_location.get(&component)?;
-        let column = map.get(&archetype_index)?.clone();
-        Some(self.archetypes[archetype_index].ref_at(column, entity_index))
+        identity: ComponentIdentity,
+    ) -> Option<ErasedRef> {
+        let loc= self.entities.get(entity)?;
+        self.archetypes.get_component_at(loc, identity)
     }
+
+    /*pub fn build_query(&self, builder: QueryBuilder) -> Query {
+        let QueryBuilder {
+            requested_components,
+        } = builder;
+
+        let accessible_components = HashMap::from_iter(requested_components
+            .iter()
+            .cloned()
+            .filter(|component| self.component_bridge.is_sized_component(component))
+            .flat_map(|component| self.component_bridge.find_identity(&component))
+            .enumerate()
+            .map(|(a, b)| (b, a))
+        );
+
+        if requested_components.len() == 0 {
+            return Query {
+                accessible_components,
+                archetypes: (0..self.archetypes.len()).map(|u| (u, vec![])).collect(),
+            };
+        };
+
+        // the algorithm is simple for now, we compute the intersection between the archetype map of all components
+        let mut building: Vec<ColumnIndex> = Vec::with_capacity(accessible_components.len());
+        let archetypes: Vec<_> = self
+            .component_location
+            .get(&requested_components[0])
+            .into_iter()
+            .flat_map(HashMap::iter)
+            .flat_map(|(archetype_index, &column_index)| {
+                building.clear();
+                if self
+                    .component_bridge
+                    .is_sized_component(&requested_components[0])
+                {
+                    building.push(column_index);
+                }
+                for other_component in &requested_components[1..] {
+                    let map = self.component_location.get(other_component)?;
+                    let pos = map.get(archetype_index)?;
+                    if self.component_bridge.is_sized_component(other_component) {
+                        building.push(*pos);
+                    }
+                }
+                Some((*archetype_index, building.clone()))
+            })
+            .collect();
+
+        Query {
+            accessible_components,
+            archetypes,
+        }
+    }*/
 }

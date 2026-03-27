@@ -1,4 +1,5 @@
-use crate::component_bridge::ComponentIdentityBridge;
+use super::component_bridge::ComponentIdentityBridge;
+use super::{ColumnIndex, EntityIndex};
 use crate::shared::id::{Component, Entity};
 use reflexion::erased::{DropLocation, ErasedMut, ErasedMutPointer, ErasedRef};
 use std::alloc::{Layout, handle_alloc_error};
@@ -27,7 +28,7 @@ impl Archetype {
             .iter()
             .map(|component| {
                 let info = component_bridge.find_type_info(component);
-                ErasedMutPointer::null(info.type_info)
+                ErasedMutPointer::null(info)
             })
             .collect();
 
@@ -79,7 +80,7 @@ impl Archetype {
         &mut self,
         id: Entity,
         components: impl Iterator<Item = (Component, DropLocation<'a>)>,
-    ) -> Result<usize, ArchetypeError> {
+    ) -> Result<EntityIndex, ArchetypeError> {
         if self.len() == self.capacity() {
             self.grow_columns(self.capacity().max(4))
         }
@@ -106,18 +107,18 @@ impl Archetype {
         Ok(location)
     }
 
-pub fn ref_at<'a>(&'a self, column: usize, index: usize) -> ErasedRef<'a> {
+    pub fn ref_at<'a>(&'a self, column: ColumnIndex, index: EntityIndex) -> ErasedRef<'a> {
         assert!(index < self.len(), "out of range");
         unsafe { self.columns[column].offset(index).as_erased_ref::<'a>() }
     }
 
-    pub fn mut_at<'a>(&'a mut self, column: usize, index: usize) -> ErasedMut<'a> {
+    pub fn mut_at<'a>(&'a mut self, column: ColumnIndex, index: EntityIndex) -> ErasedMut<'a> {
         assert!(index < self.len(), "out of range");
         unsafe { self.columns[column].offset(index).as_erased_mut::<'a>() }
     }
 
     /// return an iterator containing all removed components
-    pub fn swap_remove<'a>(&'a mut self, location: usize) -> RemoveIterator<'a> {
+    pub fn swap_remove<'a>(&'a mut self, location: EntityIndex) -> RemoveIterator<'a> {
         RemoveIterator::<'a>::new(self, location)
     }
 }
@@ -138,11 +139,11 @@ impl Drop for Archetype {
 pub struct RemoveIterator<'a> {
     archetype: &'a mut Archetype,
     i: usize,
-    location: usize,
+    location: EntityIndex,
 }
 
 impl<'a> RemoveIterator<'a> {
-    fn new(archetype: &'a mut Archetype, location: usize) -> Self {
+    fn new(archetype: &'a mut Archetype, location: EntityIndex) -> Self {
         Self {
             archetype,
             i: 0,
@@ -151,7 +152,7 @@ impl<'a> RemoveIterator<'a> {
     }
 
     ///return which entity is being moved, and where it will end up
-    pub fn moved_entity(&self) -> Option<(Entity, usize)> {
+    pub fn moved_entity(&self) -> Option<(Entity, EntityIndex)> {
         if self.archetype.len() > 1 {
             self.archetype.entities.last().map(|e| (*e, self.location))
         } else {
