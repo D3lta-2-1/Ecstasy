@@ -41,7 +41,7 @@ fn creation() {
 fn addition_no_overwrite() {
     let mut registry = RegistryHeader::new();
     let e = registry.new_entity(Pos { x: 3.0, y: 6.0 });
-    registry.add(e, Vel { x: 1.0, y: 1.0 });
+    registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
     let pos = registry.get_single::<Pos>(e).cloned();
     let vel = registry.get_single::<Vel>(e).cloned();
@@ -53,7 +53,7 @@ fn addition_no_overwrite() {
 fn addition_with_overwrite() {
     let mut registry = RegistryHeader::new();
     let e = registry.new_entity((Pos { x: 3.0, y: 6.0 }, Vel { x: 0.0, y: 0.0 }));
-    registry.add(e, Vel { x: 1.0, y: 1.0 });
+    registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
     let pos = registry.get_single::<Pos>(e).cloned();
     let vel = registry.get_single::<Vel>(e).cloned();

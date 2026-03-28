@@ -35,7 +35,10 @@ impl EntityManager {
 
     pub fn update_location(
         &mut self,
-        MovedEntity{entity, new_location}: MovedEntity
+        MovedEntity {
+            entity,
+            new_location,
+        }: MovedEntity,
     ) {
         let (id, location) = self
             .short_living_entity

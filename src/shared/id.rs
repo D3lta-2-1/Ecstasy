@@ -1,4 +1,4 @@
-use reflexion::typeinfo::{TypeInfo, TypeInfoProvider};
+use reflexion::typeinfo::TypeInfo;
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 

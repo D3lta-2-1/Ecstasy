@@ -1,13 +1,12 @@
-use std::collections::HashMap;
-use std::iter::zip;
-use reflexion::erased::{DropLocation, ErasedRef};
 use crate::registry::archetype::Archetype;
-use crate::registry::{ArchetypeIndex, ColumnIndex, EntityIndex, MovedEntity};
 use crate::registry::component_bridge::ComponentIdentityBridge;
 use crate::registry::entity_manager::EntityLocation;
 use crate::registry::merge_iter::MergeIter;
+use crate::registry::{ArchetypeIndex, ColumnIndex, MovedEntity};
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
-
+use reflexion::erased::{DropLocation, ErasedRef};
+use std::collections::HashMap;
+use std::iter::zip;
 
 // releasing archetype can be very challenging, for now, they nerver get released
 pub struct ArchetypeManager {
@@ -54,15 +53,29 @@ impl ArchetypeManager {
     }
 
     /// push an entity at a new location, the iterator needs to be sorted
-    pub fn push<'a>(&mut self, archetype_index: ArchetypeIndex, entity: Entity, components: impl Iterator<Item = (Component, DropLocation<'a>)>) -> EntityLocation {
-        let entity_index = self.archetypes[archetype_index].push(entity, components).expect("insertion failed");
+    pub fn push<'a>(
+        &mut self,
+        archetype_index: ArchetypeIndex,
+        entity: Entity,
+        components: impl Iterator<Item = (Component, DropLocation<'a>)>,
+    ) -> EntityLocation {
+        let entity_index = self.archetypes[archetype_index]
+            .push(entity, components)
+            .expect("insertion failed");
         EntityLocation {
             archetype_index,
             entity_index,
         }
     }
 
-    pub fn get_component_at(&self, EntityLocation{ archetype_index, entity_index }: EntityLocation, component: ComponentIdentity) -> Option<ErasedRef> {
+    pub fn get_component_at(
+        &'_ self,
+        EntityLocation {
+            archetype_index,
+            entity_index,
+        }: EntityLocation,
+        component: ComponentIdentity,
+    ) -> Option<ErasedRef<'_>> {
         let component = self.component_bridge.find_component(&component)?;
         let map = self.component_location.get(&component)?;
         let column = map.get(&archetype_index)?.clone();
@@ -71,16 +84,23 @@ impl ArchetypeManager {
 
     /// write an iterator at a given location, the archetype must already have an initialized component
     /// the iterator doesn't need to be sorted
-    pub fn set_components<'a>(&mut self, EntityLocation{ archetype_index, entity_index }: EntityLocation, components: impl Iterator<Item = (Component, DropLocation<'a>)>) {
+    pub fn set_components<'a>(
+        &mut self,
+        EntityLocation {
+            archetype_index,
+            entity_index,
+        }: EntityLocation,
+        components: impl Iterator<Item = (Component, DropLocation<'a>)>,
+    ) {
         let archetype = &mut self.archetypes[archetype_index];
         for (component, value) in components {
             // the archetype already exist, because the entity is already in, so both of these operations are safe
             let column = self
                 .component_location
                 .get(&component)
-                .unwrap()
-                .get(&entity_index)
-                .expect("location not found");
+                .expect("no location associated with this component")
+                .get(&archetype_index)
+                .expect("archetype not found");
             archetype.mut_at(*column, entity_index).write(value);
         }
     }
@@ -145,15 +165,14 @@ impl ArchetypeManager {
             new_location: EntityLocation {
                 archetype_index: dst_archetype_index,
                 entity_index: new_location,
-            }
+            },
         };
-        let mov2 = moved_entity.map(|(entity, new_location)|
-            MovedEntity {
-                entity,
-                new_location: EntityLocation {
-                    archetype_index: dst_archetype_index,
-                    entity_index: new_location,
-                }
+        let mov2 = moved_entity.map(|(entity, new_location)| MovedEntity {
+            entity,
+            new_location: EntityLocation {
+                archetype_index: dst_archetype_index,
+                entity_index: new_location,
+            },
         });
         (mov1, mov2)
     }
