@@ -131,6 +131,19 @@ impl ArchetypeManager {
         self.component_bridge.find_component(component)
     }
 
+    pub fn find_column(
+        &self,
+        component: Component,
+        archetype_index: ArchetypeIndex,
+    ) -> ColumnIndex {
+        *self
+            .component_location
+            .get(&component)
+            .expect("no location associated with this component")
+            .get(&archetype_index)
+            .expect("archetype not found")
+    }
+
     /// move an entity from an archetype to another,
     /// if the additional components only overwrite the old one (if there isn't any move)
     /// it will panic

@@ -3,9 +3,12 @@ mod archetype_manager;
 mod component_bridge;
 mod entity_manager;
 mod merge_iter;
+mod query;
+mod query_manager;
 
 use crate::registry::archetype_manager::ArchetypeManager;
 use crate::registry::entity_manager::{EntityLocation, EntityManager};
+use crate::registry::query_manager::QueryManager;
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use merge_iter::MergeIter;
 use reflexion::erased::{DropLocation, ErasedRef};
@@ -15,7 +18,7 @@ use std::iter::zip;
 pub type ArchetypeIndex = usize;
 pub type EntityIndex = usize;
 pub type ColumnIndex = usize;
-
+pub type QueryIndex = usize;
 pub(crate) struct MovedEntity {
     entity: Entity,
     new_location: EntityLocation,
@@ -25,6 +28,7 @@ pub struct Registry {
     // where each entity is located in the registry
     entities: EntityManager,
     archetypes: ArchetypeManager,
+    queries: QueryManager,
 }
 
 /// Design choices
@@ -37,6 +41,7 @@ impl Registry {
         Registry {
             entities: EntityManager::default(),
             archetypes: ArchetypeManager::new(),
+            queries: QueryManager::default(),
         }
     }
 

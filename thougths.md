@@ -12,3 +12,6 @@ This game loop shouldn't be used to render the game. This will be built with par
   * Query based system, which can be run in parallel as long as they don't overlap
   * Command based system, built for entity creation/deletion. they require to acquire all archetype,
     and can't be run in parallel
+
+# planned: 
+update most integer map for perfect map, they are more costly to build, but have faster get/iter
