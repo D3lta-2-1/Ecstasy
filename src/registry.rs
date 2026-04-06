@@ -8,6 +8,7 @@ mod query_manager;
 
 use crate::registry::archetype_manager::ArchetypeManager;
 use crate::registry::entity_manager::{EntityLocation, EntityManager};
+use crate::registry::query::QueryBuilder;
 use crate::registry::query_manager::QueryManager;
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use merge_iter::MergeIter;
@@ -27,7 +28,9 @@ pub(crate) struct MovedEntity {
 pub struct Registry {
     // where each entity is located in the registry
     entities: EntityManager,
+    // archetype container
     archetypes: ArchetypeManager,
+    // track, and maintain queries
     queries: QueryManager,
 }
 
@@ -84,11 +87,13 @@ impl Registry {
         assert!(
             components
                 .windows(2)
-                .all(|slice| { if let [a, b] = slice { a != b } else { false } }),
-            "components must be different"
+                .all(|slice| { if let [a, b] = slice { a < b } else { false } }),
+            "components must be different, and sorted"
         );
 
-        let archetype_index = self.archetypes.find_or_create_archetype(components.into());
+        let archetype_index = self
+            .archetypes
+            .find_or_create_archetype(components.into(), &mut self.queries);
         self.entities.allocate(|entity| {
             self.archetypes.push(
                 archetype_index,
@@ -108,7 +113,7 @@ impl Registry {
         assert!(
             components
                 .windows(2)
-                .all(|slice| { if let [a, b] = slice { a != b } else { false } }),
+                .all(|slice| { if let [a, b] = slice { a < b } else { false } }),
             "components must be different"
         );
         assert!(components.len() > 0);
@@ -124,7 +129,9 @@ impl Registry {
             .cloned()
             .collect();
 
-        let dst_archetype_index = self.archetypes.find_or_create_archetype(dst_header);
+        let dst_archetype_index = self
+            .archetypes
+            .find_or_create_archetype(dst_header, &mut self.queries);
 
         if src_archetype_index == dst_archetype_index {
             self.archetypes
@@ -155,56 +162,10 @@ impl Registry {
         self.archetypes.get_component_at(loc, identity)
     }
 
-    /*pub fn build_query(&self, builder: QueryBuilder) -> Query {
-        let QueryBuilder {
-            requested_components,
-        } = builder;
-
-        let accessible_components = HashMap::from_iter(requested_components
-            .iter()
-            .cloned()
-            .filter(|component| self.component_bridge.is_sized_component(component))
-            .flat_map(|component| self.component_bridge.find_identity(&component))
-            .enumerate()
-            .map(|(a, b)| (b, a))
-        );
-
-        if requested_components.len() == 0 {
-            return Query {
-                accessible_components,
-                archetypes: (0..self.archetypes.len()).map(|u| (u, vec![])).collect(),
-            };
-        };
-
-        // the algorithm is simple for now, we compute the intersection between the archetype map of all components
-        let mut building: Vec<ColumnIndex> = Vec::with_capacity(accessible_components.len());
-        let archetypes: Vec<_> = self
-            .component_location
-            .get(&requested_components[0])
-            .into_iter()
-            .flat_map(HashMap::iter)
-            .flat_map(|(archetype_index, &column_index)| {
-                building.clear();
-                if self
-                    .component_bridge
-                    .is_sized_component(&requested_components[0])
-                {
-                    building.push(column_index);
-                }
-                for other_component in &requested_components[1..] {
-                    let map = self.component_location.get(other_component)?;
-                    let pos = map.get(archetype_index)?;
-                    if self.component_bridge.is_sized_component(other_component) {
-                        building.push(*pos);
-                    }
-                }
-                Some((*archetype_index, building.clone()))
-            })
-            .collect();
-
-        Query {
-            accessible_components,
-            archetypes,
-        }
-    }*/
+    /// this function will return the query ID associated with this builder, and create if required
+    /// Queries can't be deleted, they are mean't to be used through systems
+    pub fn get_query_id(&mut self, builder: QueryBuilder) -> QueryIndex {
+        self.queries
+            .insert_query(builder, |builder| self.archetypes.create_query(builder))
+    }
 }

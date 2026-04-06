@@ -107,20 +107,33 @@ impl Archetype {
         Ok(location)
     }
 
-    pub fn ref_at<'a>(&'a self, column: ColumnIndex, index: EntityIndex) -> ErasedRef<'a> {
-        assert!(index < self.len(), "out of range");
-        unsafe { self.columns[column].offset(index).as_erased_ref::<'a>() }
+    pub fn ref_at<'a>(&'a self, location: ComponentValueLocation) -> ErasedRef<'a> {
+        assert!(location.entity_index < self.len(), "out of range");
+        unsafe {
+            self.columns[location.column]
+                .offset(location.entity_index)
+                .as_erased_ref::<'a>()
+        }
     }
 
-    pub fn mut_at<'a>(&'a mut self, column: ColumnIndex, index: EntityIndex) -> ErasedMut<'a> {
-        assert!(index < self.len(), "out of range");
-        unsafe { self.columns[column].offset(index).as_erased_mut::<'a>() }
+    pub fn mut_at<'a>(&'a mut self, location: ComponentValueLocation) -> ErasedMut<'a> {
+        assert!(location.entity_index < self.len(), "out of range");
+        unsafe {
+            self.columns[location.column]
+                .offset(location.entity_index)
+                .as_erased_mut::<'a>()
+        }
     }
 
     /// return an iterator containing all removed components
     pub fn swap_remove<'a>(&'a mut self, location: EntityIndex) -> RemoveIterator<'a> {
         RemoveIterator::<'a>::new(self, location)
     }
+}
+
+pub struct ComponentValueLocation {
+    pub column: ColumnIndex,
+    pub entity_index: EntityIndex,
 }
 
 impl Drop for Archetype {

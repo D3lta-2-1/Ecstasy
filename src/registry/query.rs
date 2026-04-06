@@ -1,19 +1,21 @@
-use crate::registry::archetype::Archetype;
 use crate::registry::archetype_manager::ArchetypeManager;
 use crate::registry::{ArchetypeIndex, ColumnIndex};
-use crate::shared::id::Component;
+use crate::shared::id::{Component, ComponentIdentity};
 use std::collections::HashMap;
 
 type LocalColumnIndex = usize;
 
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct QueryBuilder {
     pub requested_components: Vec<Component>,
 }
 
+/// a Query is a shortcut to access archetypes, being part of the registry storage, that share common properties
+/// a Query is able to quickly find all column that contain sized component
 pub struct Query {
-    requested_components: Vec<Component>, // contain all components, even unsized components
-    component_map: HashMap<Component, LocalColumnIndex>, // only keep sized components,
-    archetypes: HashMap<ArchetypeIndex, Vec<ColumnIndex>>, //where stuff is located in the archetype.
+    pub(crate) requested_components: Vec<Component>, // contain all components, even unsized components
+    pub(crate) accessible_components: HashMap<ComponentIdentity, LocalColumnIndex>, // only keep sized components,
+    pub(crate) archetypes: HashMap<ArchetypeIndex, Vec<ColumnIndex>>, //where stuff is located in the archetype.
 }
 
 impl Query {
@@ -26,11 +28,26 @@ impl Query {
         archetype_index: ArchetypeIndex,
         archetypes: &ArchetypeManager,
     ) {
-        let mut mapping = vec![0; self.component_map.len()];
-        for (component, local_index) in self.component_map.iter() {
-            let colum = archetypes.find_column(*component, archetype_index);
+        let mut mapping = vec![0; self.accessible_components.len()];
+        for (component, local_index) in self.accessible_components.iter() {
+            let component = archetypes
+                .find_component(component)
+                .expect("this archetype don't match the query requirements");
+            let colum = archetypes.find_column(component, archetype_index);
             mapping[*local_index] = colum;
         }
         self.archetypes.insert(archetype_index, mapping);
+    }
+
+    pub fn get_component_location(
+        &self,
+        component: &ComponentIdentity,
+        archetype_index: ArchetypeIndex,
+    ) -> Option<ColumnIndex> {
+        let local_index = self.accessible_components.get(component)?;
+        self.archetypes
+            .get(&archetype_index)?
+            .get(*local_index)
+            .cloned()
     }
 }

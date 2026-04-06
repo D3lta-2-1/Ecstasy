@@ -1,7 +1,9 @@
-use crate::registry::archetype::Archetype;
+use crate::registry::archetype::{Archetype, ComponentValueLocation};
 use crate::registry::component_bridge::ComponentIdentityBridge;
 use crate::registry::entity_manager::EntityLocation;
 use crate::registry::merge_iter::MergeIter;
+use crate::registry::query::{Query, QueryBuilder};
+use crate::registry::query_manager::QueryManager;
 use crate::registry::{ArchetypeIndex, ColumnIndex, MovedEntity};
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use reflexion::erased::{DropLocation, ErasedRef};
@@ -79,7 +81,12 @@ impl ArchetypeManager {
         let component = self.component_bridge.find_component(&component)?;
         let map = self.component_location.get(&component)?;
         let column = map.get(&archetype_index)?.clone();
-        Some(self.archetypes[archetype_index].ref_at(column, entity_index))
+        Some(
+            self.archetypes[archetype_index].ref_at(ComponentValueLocation {
+                column,
+                entity_index,
+            }),
+        )
     }
 
     /// write an iterator at a given location, the archetype must already have an initialized component
@@ -95,18 +102,27 @@ impl ArchetypeManager {
         let archetype = &mut self.archetypes[archetype_index];
         for (component, value) in components {
             // the archetype already exist, because the entity is already in, so both of these operations are safe
-            let column = self
+            let column = *self
                 .component_location
                 .get(&component)
                 .expect("no location associated with this component")
                 .get(&archetype_index)
                 .expect("archetype not found");
-            archetype.mut_at(*column, entity_index).write(value);
+            archetype
+                .mut_at(ComponentValueLocation {
+                    column,
+                    entity_index,
+                })
+                .write(value);
         }
     }
 
     /// try to find an archetype that contains the components, if not found, create a new archetype with the components.
-    pub fn find_or_create_archetype(&mut self, components: Vec<Component>) -> ArchetypeIndex {
+    pub fn find_or_create_archetype(
+        &mut self,
+        components: Vec<Component>,
+        query_manager: &mut QueryManager,
+    ) -> ArchetypeIndex {
         debug_assert!(components.is_sorted());
         let archetype_index = self.components_set_to_archetype.get(&components);
         if let Some(index) = archetype_index {
@@ -124,6 +140,9 @@ impl ArchetypeManager {
         self.archetypes.push(new_archetype);
         self.components_set_to_archetype
             .insert(components, archetype_index);
+
+        query_manager.add_archetype(archetype_index, self);
+
         archetype_index
     }
 
@@ -188,5 +207,64 @@ impl ArchetypeManager {
             },
         });
         (mov1, mov2)
+    }
+
+    /// this function can be used to build to kind of queries,
+    /// - long living query, that are stored in the query manager in order to be maintained
+    /// - short living query, which will only remain valid as long as archetypes doesn't change
+    pub fn create_query(&self, builder: QueryBuilder) -> Query {
+        let QueryBuilder {
+            requested_components,
+        } = builder;
+
+        let accessible_components = HashMap::from_iter(
+            requested_components
+                .iter()
+                .cloned()
+                .filter(|component| self.component_bridge.is_sized_component(component))
+                .flat_map(|component| self.component_bridge.find_identity(&component))
+                .enumerate()
+                .map(|(a, b)| (b, a)),
+        );
+
+        if requested_components.len() == 0 {
+            return Query {
+                requested_components,
+                archetypes: HashMap::from_iter((0..self.archetypes.len()).map(|u| (u, vec![]))),
+                accessible_components: Default::default(),
+            };
+        };
+
+        // the algorithm is simple for now, we compute the intersection between the archetype map of all components
+        let mut building: Vec<ColumnIndex> = Vec::with_capacity(accessible_components.len());
+        let archetypes = HashMap::from_iter(
+            self.component_location
+                .get(&requested_components[0])
+                .into_iter()
+                .flat_map(HashMap::iter)
+                .flat_map(|(archetype_index, &column_index)| {
+                    building.clear();
+                    if self
+                        .component_bridge
+                        .is_sized_component(&requested_components[0])
+                    {
+                        building.push(column_index);
+                    }
+                    for other_component in &requested_components[1..] {
+                        let map = self.component_location.get(other_component)?;
+                        let pos = map.get(archetype_index)?;
+                        if self.component_bridge.is_sized_component(other_component) {
+                            building.push(*pos);
+                        }
+                    }
+                    Some((*archetype_index, building.clone()))
+                }),
+        );
+
+        Query {
+            requested_components,
+            accessible_components,
+            archetypes,
+        }
     }
 }
