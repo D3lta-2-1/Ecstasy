@@ -1,10 +1,13 @@
 use super::component_bridge::ComponentIdentityBridge;
-use super::{ColumnIndex, EntityIndex};
+use super::EntityIndex;
 use crate::shared::id::{Component, Entity};
 use reflexion::erased::{DropLocation, ErasedMut, ErasedMutPointer, ErasedRef};
 use std::alloc::{Layout, handle_alloc_error};
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
+
+pub type ArchetypeIndex = usize;
+pub type ColumnIndex = usize;
 
 /// structure in charge of storing data for a specific entity
 pub struct Archetype {
@@ -64,8 +67,8 @@ impl Archetype {
                 if columm.is_null() {
                     handle_alloc_error(
                         Layout::from_size_align(
-                            columm.type_info.layout.size * new_size,
-                            columm.type_info.layout.align,
+                            columm.size() * new_size,
+                            columm.align(),
                         )
                         .unwrap(),
                     )
@@ -128,6 +131,13 @@ impl Archetype {
     /// return an iterator containing all removed components
     pub fn swap_remove<'a>(&'a mut self, location: EntityIndex) -> RemoveIterator<'a> {
         RemoveIterator::<'a>::new(self, location)
+    }
+
+    pub unsafe fn get_colum_begin(&self, columns: &[ColumnIndex], starts: &mut [ErasedMutPointer]) -> &[Entity] {
+        for (start, index) in starts.iter_mut().zip(columns) {
+            *start = self.columns[*index];
+        }
+        &self.entities
     }
 }
 

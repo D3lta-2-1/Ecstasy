@@ -1,4 +1,5 @@
 pub mod bundle;
+pub mod query;
 
 use crate::registry::Registry;
 pub use crate::registry_header::bundle::{Component, StaticBundle};
@@ -48,7 +49,7 @@ impl RegistryHeader {
         })
     }
 
-    pub fn get_single<T: Component>(&self, entity: Entity) -> Option<&T> {
+    pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
         self.registry
             .get_one_component(entity, T::DESCRIPTOR.identity)
             .map(|c| c.cast::<T>())

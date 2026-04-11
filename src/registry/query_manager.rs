@@ -1,16 +1,17 @@
 use crate::registry::archetype_manager::ArchetypeManager;
-use crate::registry::query::{Query, QueryBuilder};
+use crate::registry::query::Query;
 use crate::registry::{ArchetypeIndex, QueryIndex};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use crate::shared::id::Component;
 
 /// store and maintain Query.
-/// Query aren't deletable
+/// Queries aren't deletable
 #[derive(Default)]
 pub struct QueryManager {
     queries: Vec<Query>, //I didn't find a smarter way than iterating through all queries to find candidats in case of an archetype match
     // since archetype creation should be occasional, it shouldn't be an issue
-    builder_to_queries: HashMap<QueryBuilder, QueryIndex>,
+    builder_to_queries: HashMap<Vec<Component>, QueryIndex>,
 }
 
 fn contain<T: Ord>(container: &[T], contained: &[T]) -> bool {
@@ -39,8 +40,8 @@ fn test_contain() {
 impl QueryManager {
     pub fn insert_query(
         &mut self,
-        builder: QueryBuilder,
-        builder_func: impl Fn(QueryBuilder) -> Query,
+        builder: Vec<Component>,
+        builder_func: impl Fn(Vec<Component>) -> Query,
     ) -> QueryIndex {
         if let Some(index) = self.builder_to_queries.get(&builder) {
             return *index;
@@ -50,6 +51,10 @@ impl QueryManager {
         self.queries.push(query);
         self.builder_to_queries.insert(builder, index);
         index
+    }
+
+    pub fn get_query(&self, index: QueryIndex) -> &Query {
+        &self.queries[index]
     }
 
     pub fn add_archetype(

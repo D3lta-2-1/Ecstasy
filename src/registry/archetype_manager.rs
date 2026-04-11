@@ -2,11 +2,11 @@ use crate::registry::archetype::{Archetype, ComponentValueLocation};
 use crate::registry::component_bridge::ComponentIdentityBridge;
 use crate::registry::entity_manager::EntityLocation;
 use crate::registry::merge_iter::MergeIter;
-use crate::registry::query::{Query, QueryBuilder};
+use crate::registry::query::Query;
 use crate::registry::query_manager::QueryManager;
 use crate::registry::{ArchetypeIndex, ColumnIndex, MovedEntity};
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
-use reflexion::erased::{DropLocation, ErasedRef};
+use reflexion::erased::{DropLocation, ErasedMutPointer, ErasedRef};
 use std::collections::HashMap;
 use std::iter::zip;
 
@@ -212,11 +212,7 @@ impl ArchetypeManager {
     /// this function can be used to build to kind of queries,
     /// - long living query, that are stored in the query manager in order to be maintained
     /// - short living query, which will only remain valid as long as archetypes doesn't change
-    pub fn create_query(&self, builder: QueryBuilder) -> Query {
-        let QueryBuilder {
-            requested_components,
-        } = builder;
-
+    pub fn create_query(&self, requested_components: Vec<Component>) -> Query {
         let accessible_components = HashMap::from_iter(
             requested_components
                 .iter()
@@ -265,6 +261,13 @@ impl ArchetypeManager {
             requested_components,
             accessible_components,
             archetypes,
+        }
+    }
+
+    //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
+    pub unsafe fn get_colum_begin(&self, archetype_index: ArchetypeIndex, columns: &[ColumnIndex], starts: &mut [ErasedMutPointer]) -> &[Entity] {
+        unsafe {
+            self.archetypes[archetype_index].get_colum_begin(columns, starts)
         }
     }
 }

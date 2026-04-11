@@ -1,5 +1,7 @@
-use crate::registry::{ArchetypeIndex, EntityIndex, MovedEntity};
+use crate::registry::{ArchetypeIndex, MovedEntity};
 use crate::shared::id::Entity;
+
+pub type EntityIndex = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntityLocation {

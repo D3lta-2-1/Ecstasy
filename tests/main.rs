@@ -1,4 +1,5 @@
 use ecstasy::registry_header::{Component, RegistryHeader};
+use ecstasy::registry_header::query::Query;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Pos {
@@ -28,9 +29,9 @@ fn creation() {
     let e1 = registry.new_entity((Pos { x: 0.0, y: 0.0 }, Vel { x: 1.0, y: 1.0 }));
     let e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
 
-    let pos1 = registry.get_single::<Pos>(e1).cloned();
-    let vel = registry.get_single::<Vel>(e1).cloned();
-    let pos2 = registry.get_single::<Pos>(e2).cloned();
+    let pos1 = registry.get::<Pos>(e1).cloned();
+    let vel = registry.get::<Vel>(e1).cloned();
+    let pos2 = registry.get::<Pos>(e2).cloned();
 
     assert_eq!(pos1, Some(Pos { x: 0.0, y: 0.0 }));
     assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
@@ -43,8 +44,8 @@ fn addition_no_overwrite() {
     let e = registry.new_entity(Pos { x: 3.0, y: 6.0 });
     registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
-    let pos = registry.get_single::<Pos>(e).cloned();
-    let vel = registry.get_single::<Vel>(e).cloned();
+    let pos = registry.get::<Pos>(e).cloned();
+    let vel = registry.get::<Vel>(e).cloned();
     assert_eq!(pos, Some(Pos { x: 3.0, y: 6.0 }));
     assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
 }
@@ -55,8 +56,20 @@ fn addition_with_overwrite() {
     let e = registry.new_entity((Pos { x: 3.0, y: 6.0 }, Vel { x: 0.0, y: 0.0 }));
     registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
-    let pos = registry.get_single::<Pos>(e).cloned();
-    let vel = registry.get_single::<Vel>(e).cloned();
+    let pos = registry.get::<Pos>(e).cloned();
+    let vel = registry.get::<Vel>(e).cloned();
     assert_eq!(pos, Some(Pos { x: 3.0, y: 6.0 }));
     assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
+}
+
+#[test]
+fn query() {
+    let mut registry = RegistryHeader::new();
+    let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
+    let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
+
+    let query = Query::<(&Pos, &Vel), _>::new(&mut registry);
+    let (pos, vel) = query.get(&registry, e1).expect("e1 got things tho");
+    assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
+    assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
 }

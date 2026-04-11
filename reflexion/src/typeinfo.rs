@@ -43,7 +43,7 @@ pub struct TypeInfoImpl {
     pub destructor: unsafe fn(*mut u8),
 }
 
-pub type TypeInfo = &'static TypeInfoImpl;
+pub type TypeInfo = Option<&'static TypeInfoImpl>;
 
 impl PartialEq for TypeInfoImpl {
     fn eq(&self, other: &Self) -> bool {
@@ -75,8 +75,8 @@ pub trait TypeInfoProvider {
 }
 
 impl<T: Sized> TypeInfoProvider for T {
-    const TYPE_INFO: TypeInfo = &TypeInfoImpl {
+    const TYPE_INFO: TypeInfo = Some(&TypeInfoImpl {
         layout: Layout::new::<T>(),
         destructor: TypeInfoImpl::destructor::<T>,
-    };
+    });
 }

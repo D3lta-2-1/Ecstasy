@@ -30,7 +30,7 @@ impl ComponentIdentityBridge {
     }
 
     pub fn is_sized_component(&self, component: &Component) -> bool {
-        self.find_type_info(component).layout.size > 0
+        self.find_type_info(component).unwrap().layout.size > 0
     }
 
     pub fn find_component(&self, component_identity: &ComponentIdentity) -> Option<Component> {

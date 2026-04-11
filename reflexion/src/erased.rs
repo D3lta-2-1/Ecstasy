@@ -20,15 +20,21 @@ pub struct ErasedMutPointer {
 }
 
 impl ErasedMutPointer {
+    /// return a pointer set to null, without any type associated
+    /// any operation on the pointer will fail
+    pub fn empty() -> Self {
+        Self::null(None)
+    }
+
     pub fn null(type_info: TypeInfo) -> Self {
-        ErasedMutPointer {
+        Self {
             type_info,
             data: std::ptr::null_mut(),
         }
     }
 
     pub unsafe fn from_mut<T: Sized>(data: &mut T) -> Self {
-        ErasedMutPointer {
+        Self {
             type_info: T::TYPE_INFO,
             data: data as *mut T as *mut u8,
         }
@@ -42,15 +48,26 @@ impl ErasedMutPointer {
         self.data = std::ptr::null_mut();
     }
 
+    pub fn align(self) -> usize {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        type_info.layout.align
+    }
+
+    pub fn size(self) -> usize {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        type_info.layout.size
+    }
+
     /// allocate a memory block
     pub unsafe fn allocate(&mut self, count: usize) {
-        self.data = if self.type_info.layout.size == 0 {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        self.data = if type_info.layout.size == 0 {
             std::ptr::dangling_mut()
         } else {
             unsafe {
                 std::alloc::alloc(std::alloc::Layout::from_size_align_unchecked(
-                    self.type_info.layout.size * count,
-                    self.type_info.layout.align,
+                    type_info.layout.size * count,
+                    type_info.layout.align,
                 ))
             }
         };
@@ -58,17 +75,18 @@ impl ErasedMutPointer {
 
     /// reallocate a memory block
     pub unsafe fn reallocate(&mut self, new_count: usize) {
-        self.data = if self.type_info.layout.size == 0 {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        self.data = if type_info.layout.size == 0 {
             std::ptr::dangling_mut()
         } else {
             unsafe {
                 std::alloc::realloc(
                     self.data,
                     std::alloc::Layout::from_size_align_unchecked(
-                        self.type_info.layout.size,
-                        self.type_info.layout.align,
+                        type_info.layout.size,
+                        type_info.layout.align,
                     ),
-                    self.type_info.layout.size * new_count,
+                    type_info.layout.size * new_count,
                 )
             }
         };
@@ -76,15 +94,16 @@ impl ErasedMutPointer {
 
     /// free the associated memory block.
     pub unsafe fn deallocate(self, count: usize) {
-        if self.type_info.layout.size == 0 {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        if type_info.layout.size == 0 {
             return; // no need to deallocate zero-sized types
         }
         unsafe {
             std::alloc::dealloc(
                 self.data,
                 std::alloc::Layout::from_size_align_unchecked(
-                    self.type_info.layout.size * count,
-                    self.type_info.layout.align,
+                    type_info.layout.size * count,
+                    type_info.layout.align,
                 ),
             );
         }
@@ -92,31 +111,34 @@ impl ErasedMutPointer {
 
     /// offset the pointer using the stored type size.
     pub unsafe fn offset(self, offset: usize) -> Self {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
         unsafe {
             ErasedMutPointer {
                 type_info: self.type_info,
                 data: self
                     .data
-                    .offset((offset * self.type_info.layout.size) as isize),
+                    .offset((offset * type_info.layout.size) as isize),
             }
         }
     }
 
     pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer) {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
         assert_eq!(
             self.type_info, source.type_info,
-            "Type mismatch: cannot copy data of type {} to location of type {}",
-            source.type_info.layout.size, self.type_info.layout.size
+            "Type mismatch: cannot copy data of type {:?} to location of type {:?}",
+            source.type_info, self.type_info
         );
         assert!(!source.is_null(), "Cannot copy from a null pointer");
         unsafe {
-            std::ptr::copy_nonoverlapping(source.data, self.data, self.type_info.layout.size);
+            std::ptr::copy_nonoverlapping(source.data, self.data, type_info.layout.size);
         }
     }
 
     pub unsafe fn drop_in_place(self) {
+        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
         unsafe {
-            (self.type_info.destructor)(self.data);
+            (type_info.destructor)(self.data);
         }
     }
 
