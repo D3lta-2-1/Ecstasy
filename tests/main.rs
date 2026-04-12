@@ -68,8 +68,8 @@ fn query() {
     let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
     let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
 
-    let query = Query::<(&Pos, &Vel), _>::new(&mut registry);
-    let (pos, vel) = query.get(&registry, e1).expect("e1 got things tho");
+    let query = Query::<(&Pos, &Vel)>::new(&mut registry);
+    let (pos, vel) = query.get(&registry, e1).unwrap();
     assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
     assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
 }
