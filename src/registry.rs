@@ -11,17 +11,18 @@ use crate::registry::entity_manager::EntityManager;
 use crate::registry::query_manager::QueryManager;
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use merge_iter::MergeIter;
-use reflexion::erased::{DropLocation, ErasedMutPointer, ErasedRef};
+use reflexion::erased::{ErasedMutPointer, ErasedRef};
 use std::iter;
 use std::iter::zip;
 
-pub use entity_manager::EntityIndex as EntityIndex;
-pub use entity_manager::EntityLocation as EntityLocation;
-pub use archetype::ArchetypeIndex as ArchetypeIndex;
-pub use archetype::ColumnIndex as ColumnIndex;
-pub use query::QueryIndex as QueryIndex;
-pub use query::LocalColumnIndex as LocalColumIndex;
 use crate::registry::query::LocalColumnIndex;
+pub use archetype::ArchetypeIndex;
+pub use archetype::ColumnIndex;
+pub use entity_manager::EntityIndex;
+pub use entity_manager::EntityLocation;
+pub use query::LocalColumnIndex as LocalColumIndex;
+pub use query::QueryIndex;
+use reflexion::drop_location::DropLocation;
 
 pub(crate) struct MovedEntity {
     entity: Entity,
@@ -164,7 +165,7 @@ impl Registry {
         let loc = self.entities.get(entity)?;
         self.archetypes.get_component_at(loc, identity)
     }
-    
+
     pub fn location(&self, entity: Entity) -> Option<EntityLocation> {
         self.entities.get(entity)
     }
@@ -172,23 +173,47 @@ impl Registry {
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
     pub fn get_query_id(&mut self, builder: &[Component]) -> QueryIndex {
-        self.queries
-            .insert_query(builder.to_vec(), |builder| self.archetypes.create_query(builder))
+        self.queries.insert_query(builder.to_vec(), |builder| {
+            self.archetypes.create_query(builder)
+        })
     }
-    
-    pub fn query_get_local_column_index(&self, query_index: QueryIndex, identity: &ComponentIdentity) -> LocalColumnIndex {
+
+    pub fn query_get_local_column_index(
+        &self,
+        query_index: QueryIndex,
+        identity: &ComponentIdentity,
+    ) -> LocalColumnIndex {
         let query = self.queries.get_query(query_index);
-        *query.accessible_components.get(identity).expect("this query doesn't contain this component")
+        *query
+            .accessible_components
+            .get(identity)
+            .expect("this query doesn't contain this component")
     }
-    
-    pub fn query_get_columns_index(&self, query_index: QueryIndex, archetype_index: ArchetypeIndex) -> Option<&[ColumnIndex]> {
-        Some(&self.queries.get_query(query_index).archetypes.get(&archetype_index)?)
+
+    pub fn query_get_columns_index(
+        &self,
+        query_index: QueryIndex,
+        archetype_index: ArchetypeIndex,
+    ) -> Option<&[ColumnIndex]> {
+        Some(
+            &self
+                .queries
+                .get_query(query_index)
+                .archetypes
+                .get(&archetype_index)?,
+        )
     }
-    
+
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
-    pub unsafe fn get_colum_begin(&self, archetype_index: ArchetypeIndex, columns: &[ColumnIndex], starts: &mut [ErasedMutPointer]) -> &[Entity] {
+    pub unsafe fn get_colum_begin(
+        &self,
+        archetype_index: ArchetypeIndex,
+        columns: &[ColumnIndex],
+        starts: &mut [ErasedMutPointer],
+    ) -> &[Entity] {
         unsafe {
-            self.archetypes.get_colum_begin(archetype_index, columns, starts)
+            self.archetypes
+                .get_colum_begin(archetype_index, columns, starts)
         }
     }
 }

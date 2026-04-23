@@ -34,16 +34,4 @@ impl Query {
         }
         self.archetypes.insert(archetype_index, mapping);
     }
-
-    pub fn get_component_location(
-        &self,
-        component: &ComponentIdentity,
-        archetype_index: ArchetypeIndex,
-    ) -> Option<ColumnIndex> {
-        let local_index = self.accessible_components.get(component)?;
-        self.archetypes
-            .get(&archetype_index)?
-            .get(*local_index)
-            .cloned()
-    }
 }

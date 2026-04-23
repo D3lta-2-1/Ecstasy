@@ -2,6 +2,7 @@
 //! Most of the building blocks of this module are equivalents of mutable pointers, references and mutables references
 //! when the value isn't known at compile time
 
+use crate::drop_location::DropLocation;
 use crate::typeinfo::{TypeInfo, TypeInfoProvider};
 use std::marker::PhantomData;
 use std::mem;
@@ -49,18 +50,24 @@ impl ErasedMutPointer {
     }
 
     pub fn align(self) -> usize {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         type_info.layout.align
     }
 
     pub fn size(self) -> usize {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         type_info.layout.size
     }
 
     /// allocate a memory block
     pub unsafe fn allocate(&mut self, count: usize) {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         self.data = if type_info.layout.size == 0 {
             std::ptr::dangling_mut()
         } else {
@@ -75,7 +82,9 @@ impl ErasedMutPointer {
 
     /// reallocate a memory block
     pub unsafe fn reallocate(&mut self, new_count: usize) {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         self.data = if type_info.layout.size == 0 {
             std::ptr::dangling_mut()
         } else {
@@ -94,7 +103,9 @@ impl ErasedMutPointer {
 
     /// free the associated memory block.
     pub unsafe fn deallocate(self, count: usize) {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         if type_info.layout.size == 0 {
             return; // no need to deallocate zero-sized types
         }
@@ -111,19 +122,21 @@ impl ErasedMutPointer {
 
     /// offset the pointer using the stored type size.
     pub unsafe fn offset(self, offset: usize) -> Self {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         unsafe {
             ErasedMutPointer {
                 type_info: self.type_info,
-                data: self
-                    .data
-                    .offset((offset * type_info.layout.size) as isize),
+                data: self.data.offset((offset * type_info.layout.size) as isize),
             }
         }
     }
 
     pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer) {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         assert_eq!(
             self.type_info, source.type_info,
             "Type mismatch: cannot copy data of type {:?} to location of type {:?}",
@@ -136,7 +149,9 @@ impl ErasedMutPointer {
     }
 
     pub unsafe fn drop_in_place(self) {
-        let Some(type_info) = self.type_info else { panic!("type info doesn't exist") };
+        let Some(type_info) = self.type_info else {
+            panic!("type info doesn't exist")
+        };
         unsafe {
             (type_info.destructor)(self.data);
         }
@@ -242,50 +257,6 @@ impl<'a> ErasedMut<'a> {
         unsafe {
             self.ptr.drop_in_place();
             self.ptr.write_drop_location(drop_location);
-        }
-    }
-}
-
-/// A place where a thing is about to be dropped. If nothing is done, the underlying value is dropped.
-#[repr(C)]
-pub struct DropLocation<'a> {
-    location: ErasedMutPointer,
-    _phantom: PhantomData<&'a mut ()>,
-}
-
-impl<'a> DropLocation<'a> {
-    pub unsafe fn at(location: ErasedMutPointer) -> Self {
-        Self {
-            location,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// the passed value should be mem::forget just after
-    pub unsafe fn at_hard<T>(location: &mut T) -> Self {
-        unsafe {
-            Self {
-                location: ErasedMutPointer::from_mut(location),
-                _phantom: PhantomData,
-            }
-        }
-    }
-
-    /// init this location from a "concret" value, panic if the TypeInfo don't match required type
-    pub fn read<T>(self) -> T {
-        unsafe {
-            let value = self.location.read::<T>();
-            mem::forget(self);
-            value
-        }
-    }
-}
-
-impl<'a> Drop for DropLocation<'a> {
-    /// this might trigger a double panic, but need to be stored...
-    fn drop(&mut self) {
-        unsafe {
-            self.location.drop_in_place();
         }
     }
 }

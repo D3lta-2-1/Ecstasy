@@ -1,7 +1,8 @@
-use super::component_bridge::ComponentIdentityBridge;
 use super::EntityIndex;
+use super::component_bridge::ComponentIdentityBridge;
 use crate::shared::id::{Component, Entity};
-use reflexion::erased::{DropLocation, ErasedMut, ErasedMutPointer, ErasedRef};
+use reflexion::drop_location::DropLocation;
+use reflexion::erased::{ErasedMut, ErasedMutPointer, ErasedRef};
 use std::alloc::{Layout, handle_alloc_error};
 use std::fmt::{Debug, Formatter};
 use std::iter::zip;
@@ -66,11 +67,7 @@ impl Archetype {
                 }
                 if columm.is_null() {
                     handle_alloc_error(
-                        Layout::from_size_align(
-                            columm.size() * new_size,
-                            columm.align(),
-                        )
-                        .unwrap(),
+                        Layout::from_size_align(columm.size() * new_size, columm.align()).unwrap(),
                     )
                 }
             }
@@ -133,7 +130,11 @@ impl Archetype {
         RemoveIterator::<'a>::new(self, location)
     }
 
-    pub unsafe fn get_colum_begin(&self, columns: &[ColumnIndex], starts: &mut [ErasedMutPointer]) -> &[Entity] {
+    pub unsafe fn get_colum_begin(
+        &self,
+        columns: &[ColumnIndex],
+        starts: &mut [ErasedMutPointer],
+    ) -> &[Entity] {
         for (start, index) in starts.iter_mut().zip(columns) {
             *start = self.columns[*index];
         }

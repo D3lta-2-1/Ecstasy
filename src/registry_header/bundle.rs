@@ -1,6 +1,6 @@
 use crate::shared::id::{ComponentDescriptor, ComponentIdentity};
 use paste::paste;
-use reflexion::erased::DropLocation;
+use reflexion::drop_location::DropLocation;
 use reflexion::typeinfo::TypeInfoProvider;
 use std::mem;
 

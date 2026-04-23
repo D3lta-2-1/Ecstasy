@@ -6,7 +6,8 @@ use crate::registry::query::Query;
 use crate::registry::query_manager::QueryManager;
 use crate::registry::{ArchetypeIndex, ColumnIndex, MovedEntity};
 use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
-use reflexion::erased::{DropLocation, ErasedMutPointer, ErasedRef};
+use reflexion::drop_location::DropLocation;
+use reflexion::erased::{ErasedMutPointer, ErasedRef};
 use std::collections::HashMap;
 use std::iter::zip;
 
@@ -265,9 +266,12 @@ impl ArchetypeManager {
     }
 
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
-    pub unsafe fn get_colum_begin(&self, archetype_index: ArchetypeIndex, columns: &[ColumnIndex], starts: &mut [ErasedMutPointer]) -> &[Entity] {
-        unsafe {
-            self.archetypes[archetype_index].get_colum_begin(columns, starts)
-        }
+    pub unsafe fn get_colum_begin(
+        &self,
+        archetype_index: ArchetypeIndex,
+        columns: &[ColumnIndex],
+        starts: &mut [ErasedMutPointer],
+    ) -> &[Entity] {
+        unsafe { self.archetypes[archetype_index].get_colum_begin(columns, starts) }
     }
 }

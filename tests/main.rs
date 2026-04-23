@@ -1,5 +1,5 @@
-use ecstasy::registry_header::{Component, RegistryHeader};
 use ecstasy::registry_header::query::Query;
+use ecstasy::registry_header::{Component, RegistryHeader};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Pos {
