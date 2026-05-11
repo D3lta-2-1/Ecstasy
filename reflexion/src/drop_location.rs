@@ -1,6 +1,5 @@
 use crate::erased::ErasedMutPointer;
-use std::marker::PhantomData;
-use std::mem;
+use std::{marker::PhantomData, mem};
 
 /// A place where a thing is about to be dropped. If nothing is done, the underlying value is dropped.
 #[repr(C)]
@@ -17,7 +16,7 @@ impl<'a> DropLocation<'a> {
         }
     }
 
-    /// the passed value should be mem::forget just after
+    /// the passed value should be mem::forget just after, since the end of the borrow mean that the ressource is already released
     pub unsafe fn at_hard<T>(location: &mut T) -> Self {
         unsafe {
             Self {

@@ -1,7 +1,6 @@
-use crate::shared::id::{ComponentDescriptor, ComponentIdentity};
 use paste::paste;
-use reflexion::drop_location::DropLocation;
-use reflexion::typeinfo::TypeInfoProvider;
+use reflexion::{drop_location::DropLocation, typeinfo::TypeInfoProvider};
+use registry_ffi::{ComponentDescriptor, ComponentIdentity};
 use std::mem;
 
 pub trait Component: TypeInfoProvider {
@@ -9,8 +8,8 @@ pub trait Component: TypeInfoProvider {
     const NAME: &'static str;
     const DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
         identity: ComponentIdentity {
-            path: Self::PATH,
-            name: Self::NAME,
+            path: Self::PATH.as_ptr(),
+            name: Self::NAME.as_ptr(),
         },
         type_info: Self::TYPE_INFO,
     };

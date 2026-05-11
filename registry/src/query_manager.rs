@@ -1,9 +1,6 @@
-use crate::registry::archetype_manager::ArchetypeManager;
-use crate::registry::query::Query;
-use crate::registry::{ArchetypeIndex, QueryIndex};
-use crate::shared::id::Component;
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use crate::{ArchetypeIndex, QueryIndex, archetype_manager::ArchetypeManager, query::Query};
+use registry_ffi::Component;
+use std::{cmp::Ordering, collections::HashMap};
 
 /// store and maintain Query.
 /// Queries aren't deletable

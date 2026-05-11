@@ -1,14 +1,13 @@
-use super::EntityIndex;
-use super::component_bridge::ComponentIdentityBridge;
-use crate::shared::id::{Component, Entity};
-use reflexion::drop_location::DropLocation;
-use reflexion::erased::{ErasedMut, ErasedMutPointer, ErasedRef};
-use std::alloc::{Layout, handle_alloc_error};
-use std::fmt::{Debug, Formatter};
-use std::iter::zip;
-
-pub type ArchetypeIndex = usize;
-pub type ColumnIndex = usize;
+use crate::component_bridge::ComponentIdentityBridge;
+use reflexion::{
+    drop_location::DropLocation,
+    erased::{ErasedMut, ErasedMutPointer, ErasedRef},
+};
+use registry_ffi::{ColumnIndex, Component, Entity, EntityIndex};
+use std::{
+    fmt::{Debug, Formatter},
+    iter::zip,
+};
 
 /// structure in charge of storing data for a specific entity
 pub struct Archetype {
@@ -32,7 +31,7 @@ impl Archetype {
             .iter()
             .map(|component| {
                 let info = component_bridge.find_type_info(component);
-                ErasedMutPointer::null(info)
+                ErasedMutPointer::dangling(info)
             })
             .collect();
 
@@ -58,17 +57,13 @@ impl Archetype {
 
     fn grow_columns(&mut self, additional: usize) {
         let new_size = self.capacity() + additional;
+        let len = self.len();
         unsafe {
             for columm in self.columns.iter_mut() {
-                if columm.is_null() {
+                if len == 0 {
                     columm.allocate(new_size);
                 } else {
                     columm.reallocate(new_size);
-                }
-                if columm.is_null() {
-                    handle_alloc_error(
-                        Layout::from_size_align(columm.size() * new_size, columm.align()).unwrap(),
-                    )
                 }
             }
         }

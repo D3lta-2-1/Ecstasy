@@ -1,10 +1,6 @@
-use crate::registry::archetype_manager::ArchetypeManager;
-use crate::registry::{ArchetypeIndex, ColumnIndex};
-use crate::shared::id::{Component, ComponentIdentity};
+use crate::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
+use registry_ffi::{Component, ComponentIdentity, LocalColumnIndex};
 use std::collections::HashMap;
-
-pub type LocalColumnIndex = usize;
-pub type QueryIndex = usize;
 
 /// a Query is a shortcut to access archetypes, being part of the registry storage, that share common properties
 /// a Query is able to quickly find all column that contain sized component

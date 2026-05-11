@@ -2,10 +2,11 @@
 //! Most of the building blocks of this module are equivalents of mutable pointers, references and mutables references
 //! when the value isn't known at compile time
 
-use crate::drop_location::DropLocation;
-use crate::typeinfo::{TypeInfo, TypeInfoProvider};
-use std::marker::PhantomData;
-use std::mem;
+use crate::{
+    drop_location::DropLocation,
+    typeinfo::{TypeInfo, TypeInfoProvider},
+};
+use std::{marker::PhantomData, mem, ptr::NonNull};
 
 /// A pointer encapsulation without any type information.
 /// This is used to store pointers to any type in a generic way.
@@ -13,10 +14,11 @@ use std::mem;
 
 /// This is still a fairly low level abstraction, this doesn't really care if it content have been initialized
 /// or not, therefor, it doesn't perform any kind of ownership
+/// It is equivalent of a NonNull ptr type.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ErasedMutPointer {
-    pub data: *mut u8,
+    pub data: NonNull<u8>,
     pub type_info: TypeInfo,
 }
 
@@ -24,29 +26,23 @@ impl ErasedMutPointer {
     /// return a pointer set to null, without any type associated
     /// any operation on the pointer will fail
     pub fn empty() -> Self {
-        Self::null(None)
+        Self::dangling(None)
     }
 
-    pub fn null(type_info: TypeInfo) -> Self {
+    pub fn dangling(type_info: TypeInfo) -> Self {
         Self {
             type_info,
-            data: std::ptr::null_mut(),
+            data: NonNull::dangling(),
         }
     }
 
     pub unsafe fn from_mut<T: Sized>(data: &mut T) -> Self {
-        Self {
-            type_info: T::TYPE_INFO,
-            data: data as *mut T as *mut u8,
+        unsafe {
+            Self {
+                type_info: T::TYPE_INFO,
+                data: NonNull::new_unchecked(data as *mut T as *mut u8),
+            }
         }
-    }
-
-    pub fn is_null(self) -> bool {
-        self.data.is_null()
-    }
-
-    pub fn set_null(&mut self) {
-        self.data = std::ptr::null_mut();
     }
 
     pub fn align(self) -> usize {
@@ -69,13 +65,16 @@ impl ErasedMutPointer {
             panic!("type info doesn't exist")
         };
         self.data = if type_info.layout.size == 0 {
-            std::ptr::dangling_mut()
+            NonNull::dangling()
         } else {
             unsafe {
-                std::alloc::alloc(std::alloc::Layout::from_size_align_unchecked(
-                    type_info.layout.size * count,
-                    type_info.layout.align,
+                NonNull::new(std::alloc::alloc(
+                    std::alloc::Layout::from_size_align_unchecked(
+                        type_info.layout.size * count,
+                        type_info.layout.align,
+                    ),
                 ))
+                .expect("allocation failed")
             }
         };
     }
@@ -86,17 +85,18 @@ impl ErasedMutPointer {
             panic!("type info doesn't exist")
         };
         self.data = if type_info.layout.size == 0 {
-            std::ptr::dangling_mut()
+            NonNull::dangling()
         } else {
             unsafe {
-                std::alloc::realloc(
-                    self.data,
+                NonNull::new(std::alloc::realloc(
+                    self.data.as_ptr(),
                     std::alloc::Layout::from_size_align_unchecked(
                         type_info.layout.size,
                         type_info.layout.align,
                     ),
                     type_info.layout.size * new_count,
-                )
+                ))
+                .expect("allocation failed")
             }
         };
     }
@@ -111,7 +111,7 @@ impl ErasedMutPointer {
         }
         unsafe {
             std::alloc::dealloc(
-                self.data,
+                self.data.as_ptr(),
                 std::alloc::Layout::from_size_align_unchecked(
                     type_info.layout.size * count,
                     type_info.layout.align,
@@ -142,9 +142,12 @@ impl ErasedMutPointer {
             "Type mismatch: cannot copy data of type {:?} to location of type {:?}",
             source.type_info, self.type_info
         );
-        assert!(!source.is_null(), "Cannot copy from a null pointer");
         unsafe {
-            std::ptr::copy_nonoverlapping(source.data, self.data, type_info.layout.size);
+            std::ptr::copy_nonoverlapping(
+                source.data.as_ptr(),
+                self.data.as_ptr(),
+                type_info.layout.size,
+            );
         }
     }
 
@@ -153,12 +156,12 @@ impl ErasedMutPointer {
             panic!("type info doesn't exist")
         };
         unsafe {
-            (type_info.destructor)(self.data);
+            (type_info.destructor)(self.data.as_ptr());
         }
     }
 
     pub unsafe fn read<T>(self) -> T {
-        unsafe { (self.data as *const T).read() }
+        unsafe { (self.data.as_ptr() as *const T).read() }
     }
 
     pub unsafe fn write<T>(self, src: T) {
@@ -170,7 +173,7 @@ impl ErasedMutPointer {
                 self.type_info,
                 T::TYPE_INFO
             );
-            std::ptr::write(self.data as *mut T, src)
+            std::ptr::write(self.data.as_ptr() as *mut T, src)
         }
     }
 
@@ -216,7 +219,7 @@ impl<'a> ErasedRef<'a> {
             self.ptr.type_info,
             T::TYPE_INFO
         );
-        unsafe { &*(self.ptr.data as *const T) }
+        unsafe { &*(self.ptr.data.as_ptr() as *const T) }
     }
 }
 
@@ -249,7 +252,7 @@ impl<'a> ErasedMut<'a> {
             self.ptr.type_info,
             T::TYPE_INFO
         );
-        unsafe { &mut *(self.ptr.data as *mut T) }
+        unsafe { &mut *(self.ptr.data.as_ptr() as *mut T) }
     }
 
     /// replace the contained value with
@@ -259,4 +262,13 @@ impl<'a> ErasedMut<'a> {
             self.ptr.write_drop_location(drop_location);
         }
     }
+}
+
+#[test]
+fn ensure_layout() {
+    use std::alloc::Layout;
+    assert_eq!(
+        Layout::new::<ErasedMutPointer>(),
+        Layout::new::<Option<ErasedMutPointer>>()
+    )
 }

@@ -6,22 +6,18 @@ mod merge_iter;
 mod query;
 mod query_manager;
 
-use crate::registry::archetype_manager::ArchetypeManager;
-use crate::registry::entity_manager::EntityManager;
-use crate::registry::query_manager::QueryManager;
-use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use archetype_manager::ArchetypeManager;
+use entity_manager::EntityManager;
 use merge_iter::MergeIter;
+use query_manager::QueryManager;
 use reflexion::erased::{ErasedMutPointer, ErasedRef};
-use std::iter;
-use std::iter::zip;
 
-use crate::registry::query::LocalColumnIndex;
-pub use archetype::ArchetypeIndex;
-pub use archetype::ColumnIndex;
-pub use entity_manager::EntityIndex;
-pub use entity_manager::EntityLocation;
-pub use query::LocalColumnIndex as LocalColumIndex;
-pub use query::QueryIndex;
+pub use registry_ffi::{
+    ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QueryIndex,
+};
+use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use std::{iter, iter::zip};
+
 use reflexion::drop_location::DropLocation;
 
 pub(crate) struct MovedEntity {
@@ -62,8 +58,8 @@ impl Registry {
         }
     }
 
-    pub fn create_empty_entity(&mut self) -> Entity {
-        self.entities.allocate(|entity| {
+    pub fn create_empty_permanent_entity(&mut self) -> Entity {
+        self.entities.allocate_permanent(|entity| {
             self.archetypes.push(
                 ArchetypeManager::NO_COMPONENT_ARCHETYPE,
                 entity,
@@ -72,8 +68,8 @@ impl Registry {
         })
     }
 
-    pub fn create_empty_permanent_entity(&mut self) -> Entity {
-        self.entities.allocate_permanent(|entity| {
+    pub fn create_empty_entity(&mut self) -> Entity {
+        self.entities.allocate(|entity| {
             self.archetypes.push(
                 ArchetypeManager::NO_COMPONENT_ARCHETYPE,
                 entity,
@@ -113,7 +109,7 @@ impl Registry {
         components: &[Component],
         values: impl ExactSizeIterator<Item = DropLocation<'a>>,
     ) -> Result<(), ()> {
-        //todo add proper error handling
+        //TODO: add proper error handling
         assert!(
             components
                 .windows(2)
@@ -214,6 +210,90 @@ impl Registry {
         unsafe {
             self.archetypes
                 .get_colum_begin(archetype_index, columns, starts)
+        }
+    }
+}
+
+use reflexion::{
+    ffi_collection::FfiCollectionIter,
+    ffi_enum::{FfiOption, FfiResult},
+    ffi_slice::FfiSlice,
+};
+
+impl registry_ffi::Registry for Registry {
+    extern "C" fn find_or_register_component(
+        &mut self,
+        component: &ComponentDescriptor,
+    ) -> Component {
+        self.find_or_register_component(component)
+    }
+
+    extern "C" fn create_empty_entity(&mut self) -> Entity {
+        self.create_empty_entity()
+    }
+
+    extern "C" fn create_entity<'a>(
+        &mut self,
+        components: FfiSlice<&Component>,
+        values: FfiCollectionIter<DropLocation<'a>>,
+    ) -> Entity {
+        self.create_entity(components.into(), values)
+    }
+
+    extern "C" fn add_components<'s: 'a, 'a>(
+        &'s mut self,
+        entity: Entity,
+        components: FfiSlice<&Component>,
+        values: FfiCollectionIter<DropLocation<'a>>,
+    ) -> FfiResult<(), ()> {
+        self.add_components(entity, components.into(), values)
+            .into()
+    }
+
+    extern "C" fn get_one_component(
+        &self,
+        entity: Entity,
+        identity: ComponentIdentity,
+    ) -> FfiOption<ErasedRef<'_>> {
+        self.get_one_component(entity, identity).into()
+    }
+
+    extern "C" fn location(&self, entity: Entity) -> FfiOption<EntityLocation> {
+        self.location(entity).into()
+    }
+
+    extern "C" fn get_query_id(&mut self, builder: FfiSlice<&Component>) -> QueryIndex {
+        self.get_query_id(builder.into()).into()
+    }
+
+    extern "C" fn query_get_local_column_index(
+        &self,
+        query_index: QueryIndex,
+        identity: &ComponentIdentity,
+    ) -> LocalColumnIndex {
+        self.query_get_local_column_index(query_index, identity)
+    }
+
+    extern "C" fn query_get_columns_index(
+        &self,
+        query_index: QueryIndex,
+        archetype_index: ArchetypeIndex,
+    ) -> FfiOption<FfiSlice<&ColumnIndex>> {
+        let value: Option<FfiSlice<&ColumnIndex>> = self
+            .query_get_columns_index(query_index, archetype_index)
+            .map(|v| v.into());
+        value.into()
+    }
+
+    unsafe extern "C" fn get_colum_begin<'a>(
+        &'a self,
+        archetype_index: ArchetypeIndex,
+        columns: FfiSlice<&ColumnIndex>,
+        starts: FfiSlice<&mut ErasedMutPointer>,
+    ) -> FfiSlice<&'a Entity> {
+        unsafe {
+            self.get_colum_begin(archetype_index, columns.into(), starts.into())
+                .into()
         }
     }
 }

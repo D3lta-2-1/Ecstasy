@@ -1,5 +1,4 @@
-use std::cmp::Ordering;
-use std::iter::Peekable;
+use std::{cmp::Ordering, iter::Peekable};
 
 /// A sorted iterator over two independent sorted iterators, this will skip any duplicate if both iterator contain some and always prioritize the left iterator
 pub struct MergeIter<L, R, T>

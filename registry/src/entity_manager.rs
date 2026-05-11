@@ -1,13 +1,5 @@
-use crate::registry::{ArchetypeIndex, MovedEntity};
-use crate::shared::id::Entity;
-
-pub type EntityIndex = usize;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EntityLocation {
-    pub archetype_index: ArchetypeIndex,
-    pub entity_index: EntityIndex,
-}
+use crate::{EntityLocation, MovedEntity};
+use registry_ffi::Entity;
 
 #[derive(Default)]
 /// Store where entity are located in the registry, and manage entity id allocation

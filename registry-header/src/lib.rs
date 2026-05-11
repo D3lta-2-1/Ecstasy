@@ -1,23 +1,25 @@
 pub mod bundle;
 pub mod query;
 
-use crate::registry::Registry;
-pub use crate::registry_header::bundle::{Component, StaticBundle};
-use crate::shared::id::Entity;
+pub use crate::bundle::{Component, StaticBundle};
+use reflexion::{erased::ErasedRef, ffi_collection::FfiCollectionIter};
+use registry_ffi::{Entity, RegistryMutHandle};
 
 /// the registry header is the final interface between the ECS internal and "external" world.
 /// it's where all clean generic methods are defined
 /// each binary accessing the ECS across DLL boundaries will get a copy of all this code and data structure
 /// it's the perfect place to some target local caching such as type_id <-> component identity
-pub struct RegistryHeader {
-    registry: Registry,
+pub struct RegistryHeader<'a> {
+    registry: RegistryMutHandle<'a>,
 }
 
-impl RegistryHeader {
-    pub fn new() -> Self {
-        Self {
-            registry: Registry::new(),
-        }
+impl<'a> RegistryHeader<'a> {
+    pub fn new(handle: RegistryMutHandle<'a>) -> Self {
+        Self { registry: handle }
+    }
+
+    pub fn handle(&mut self) -> &mut RegistryMutHandle<'a> {
+        &mut self.registry
     }
 
     pub fn new_entity<const SIZE: usize, T: StaticBundle<SIZE>>(&mut self, bundle: T) -> Entity {
@@ -27,8 +29,11 @@ impl RegistryHeader {
         bundle.read(|mut locations| {
             permutation.apply_slice_in_place(&mut component);
             permutation.apply_slice_in_place(&mut locations);
-            self.registry
-                .create_entity(&component, locations.into_iter())
+
+            FfiCollectionIter::from_array(locations, |iter| {
+                self.registry
+                    .create_entity(component.as_slice().into(), iter)
+            })
         })
     }
 
@@ -44,14 +49,20 @@ impl RegistryHeader {
         bundle.read(|mut locations| {
             permutation.apply_slice_in_place(&mut component);
             permutation.apply_slice_in_place(&mut locations);
-            self.registry
-                .add_components(entity, &component, locations.into_iter())
+
+            FfiCollectionIter::from_array(locations, |iter| {
+                self.registry
+                    .add_components(entity, component.as_slice().into(), iter)
+                    .into()
+            })
         })
     }
 
     pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
-        self.registry
+        let value: Option<ErasedRef<'_>> = self
+            .registry
             .get_one_component(entity, T::DESCRIPTOR.identity)
-            .map(|c| c.cast::<T>())
+            .into();
+        value.map(|c| c.cast::<T>())
     }
 }

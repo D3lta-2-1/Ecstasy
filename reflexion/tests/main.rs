@@ -1,5 +1,5 @@
-use reflexion::erased::ErasedMutPointer;
-use reflexion::ffi_slice::FiiSlice;
+use reflexion::{erased::ErasedMutPointer, ffi_slice::FfiSlice};
+use vtable::vtable;
 
 #[test]
 fn erased() {
@@ -13,9 +13,53 @@ fn erased() {
 
 #[test]
 fn slice_test() {
-    let mut binding = [5,3,6,54,4];
+    let mut binding = [5, 3, 6, 54, 4];
     let slice = binding.as_mut();
-    let ffi_slice: FiiSlice<&mut i32> = slice.into();
+    let ffi_slice: FfiSlice<&mut i32> = slice.into();
     let slice_got: &mut [i32] = ffi_slice.into();
-    assert_eq!(slice_got, [5,3,6,54,4])
+    assert_eq!(slice_got, [5, 3, 6, 54, 4])
+}
+
+#[vtable]
+trait MovingObject {
+    extern "C" fn introduce_yourself(&self);
+}
+
+struct Vehicle {
+    wheel_number: u32,
+}
+
+impl MovingObject for Vehicle {
+    extern "C" fn introduce_yourself(&self) {
+        println!("I'm a Vehicle and I got {} wheels", self.wheel_number);
+    }
+}
+
+struct SomeKindOfLeggedThingy {
+    leg_number: u32,
+}
+
+impl MovingObject for SomeKindOfLeggedThingy {
+    extern "C" fn introduce_yourself(&self) {
+        println!("I'm alive and I got {} legs", self.leg_number);
+    }
+}
+
+// on a un type connu a la compilation, yeay
+fn kesako(moving_object: MovingObjectHandle) {
+    moving_object.introduce_yourself();
+}
+
+#[test]
+fn test_vtable() {
+    let car = Vehicle { wheel_number: 4 };
+    let cat = SomeKindOfLeggedThingy { leg_number: 4 };
+
+    let car_handle = car.as_handle();
+    let cat_handle = cat.as_handle();
+    println!("car function {:?}", car_handle.vtable.introduce_yourself);
+    println!("cat function {:?}", cat_handle.vtable.introduce_yourself);
+
+    kesako(car_handle);
+    kesako(cat_handle);
 }

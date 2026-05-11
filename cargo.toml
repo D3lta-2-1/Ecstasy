@@ -4,9 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["reflexion"]
+members = ["registry", "registry-ffi", "registry-header", "reflexion", "reflexion/vtable" ]
+
+[workspace.dependencies]
+vtable = { path = "reflexion/vtable" }
+reflexion = { path = "reflexion" }
+registry = { path = "registry" }
+registry-ffi = { path = "registry-ffi" }
+registry-header = { path = "registry-header" }
+
+[dev-dependencies]
+registry.workspace = true
+registry-ffi.workspace = true
+registry-header.workspace = true
 
 [dependencies]
 reflexion = { path = "reflexion"}
-permutation = "0.4.1"
-paste = "1.0.15"

@@ -1,5 +1,5 @@
-use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use reflexion::typeinfo::{TypeInfo, TypeInfoImpl};
+use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use std::collections::HashMap;
 
 #[derive(Default)]

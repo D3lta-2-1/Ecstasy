@@ -1,8 +1,11 @@
-use crate::registry::{ArchetypeIndex, ColumnIndex, EntityLocation, LocalColumIndex, QueryIndex};
-use crate::registry_header::{Component, RegistryHeader};
-use crate::shared::id::{ComponentDescriptor, Entity};
-use reflexion::erased::ErasedMutPointer;
+use reflexion::{erased::ErasedMutPointer, ffi_slice::FfiSlice};
+use registry_ffi::{
+    ArchetypeIndex, ColumnIndex, ComponentDescriptor, Entity, EntityLocation, LocalColumnIndex,
+    QueryIndex, RegistryMutHandle,
+};
 use std::array;
+
+use crate::Component;
 
 trait ComponentRef<'a> {
     const IS_MUT: bool; //TODO: add support for mutability
@@ -65,23 +68,21 @@ impl<'a, T: ComponentRef<'a>, U: ComponentRef<'a>> QueryBundle for (T, U) {
 
 pub struct Query<QUERY: QueryBundle> {
     id: QueryIndex,
-    local_to_column_index: QUERY::Array<LocalColumIndex>, // the ordering used here is the same the bundle fields
+    local_to_column_index: QUERY::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields
 }
 
 // TODO: improve builder interface,
 impl<QUERY: QueryBundle> Query<QUERY> {
-    pub fn new(header: &mut RegistryHeader) -> Self {
+    pub fn new(registry: &mut RegistryMutHandle) -> Self {
         let mut requested_components: Vec<_> = QUERY::DESCRIPTORS
             .as_ref()
             .iter()
-            .map(|c| header.registry.find_or_register_component(c))
+            .map(|c| registry.find_or_register_component(c))
             .collect();
         requested_components.sort();
-        let id = header.registry.get_query_id(&requested_components);
-        let columns = <QUERY::Array<LocalColumIndex>>::from_fn(|i| {
-            header
-                .registry
-                .query_get_local_column_index(id, &QUERY::DESCRIPTORS.as_ref()[i].identity)
+        let id = registry.get_query_id(requested_components.as_slice().into());
+        let columns = <QUERY::Array<LocalColumnIndex>>::from_fn(|i| {
+            registry.query_get_local_column_index(id, &QUERY::DESCRIPTORS.as_ref()[i].identity)
         });
         Self {
             id,
@@ -92,28 +93,32 @@ impl<QUERY: QueryBundle> Query<QUERY> {
     /// return the corresponding column, properly ordered for reading, return none if the archetype isn't part of the query
     fn get_columns_in_archetype(
         &self,
-        header: &RegistryHeader,
+        registry: &mut RegistryMutHandle,
         archetype_index: ArchetypeIndex,
     ) -> Option<QUERY::Array<ColumnIndex>> {
-        let columns = header
-            .registry
-            .query_get_columns_index(self.id, archetype_index)?;
+        let option: Option<FfiSlice<&ColumnIndex>> = registry
+            .query_get_columns_index(self.id, archetype_index)
+            .into();
+        let columns = option?;
         Some(<QUERY::Array<ColumnIndex>>::from_fn(|i| {
             columns[self.local_to_column_index.as_ref()[i]]
         }))
     }
 
-    pub fn get(&self, header: &RegistryHeader, entity: Entity) -> Option<QUERY> {
+    pub fn get(&self, registry: &mut RegistryMutHandle, entity: Entity) -> Option<QUERY> {
+        let option: Option<EntityLocation> = registry.location(entity).into();
         let EntityLocation {
             archetype_index,
             entity_index,
-        } = header.registry.location(entity)?;
-        let columns = self.get_columns_in_archetype(header, archetype_index)?;
+        } = option?;
+        let columns = self.get_columns_in_archetype(registry, archetype_index)?;
         let mut starts = <QUERY::TPointers>::from_fn(|_| ErasedMutPointer::empty());
         unsafe {
-            header
-                .registry
-                .get_colum_begin(archetype_index, columns.as_ref(), starts.as_mut());
+            registry.get_colum_begin(
+                archetype_index,
+                columns.as_ref().into(),
+                starts.as_mut().into(),
+            );
             starts.for_each(|p| *p = p.offset(entity_index));
             Some(QUERY::build(starts))
         }

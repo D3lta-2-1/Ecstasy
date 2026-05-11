@@ -1,15 +1,17 @@
-use crate::registry::archetype::{Archetype, ComponentValueLocation};
-use crate::registry::component_bridge::ComponentIdentityBridge;
-use crate::registry::entity_manager::EntityLocation;
-use crate::registry::merge_iter::MergeIter;
-use crate::registry::query::Query;
-use crate::registry::query_manager::QueryManager;
-use crate::registry::{ArchetypeIndex, ColumnIndex, MovedEntity};
-use crate::shared::id::{Component, ComponentDescriptor, ComponentIdentity, Entity};
-use reflexion::drop_location::DropLocation;
-use reflexion::erased::{ErasedMutPointer, ErasedRef};
-use std::collections::HashMap;
-use std::iter::zip;
+use crate::{
+    ArchetypeIndex, ColumnIndex, EntityLocation, MovedEntity,
+    archetype::{Archetype, ComponentValueLocation},
+    component_bridge::ComponentIdentityBridge,
+    merge_iter::MergeIter,
+    query::Query,
+    query_manager::QueryManager,
+};
+use reflexion::{
+    drop_location::DropLocation,
+    erased::{ErasedMutPointer, ErasedRef},
+};
+use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use std::{collections::HashMap, iter::zip};
 
 // releasing archetype can be very challenging, for now, they nerver get released
 pub struct ArchetypeManager {
