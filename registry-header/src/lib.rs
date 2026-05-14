@@ -2,8 +2,8 @@ pub mod bundle;
 pub mod query;
 
 pub use crate::bundle::{Component, StaticBundle};
-use reflexion::{erased::ErasedRef, ffi_collection::FfiCollectionIter};
-use registry_ffi::{Entity, RegistryMutHandle};
+use reflexion::ffi_collection::FfiCollectionIter;
+use registry_ffi::{Entity, RegistryError, RegistryMutHandle};
 
 /// the registry header is the final interface between the ECS internal and "external" world.
 /// it's where all clean generic methods are defined
@@ -41,7 +41,7 @@ impl<'a> RegistryHeader<'a> {
         &mut self,
         entity: Entity,
         bundle: T,
-    ) -> Result<(), ()> {
+    ) -> Result<(), RegistryError> {
         let mut component: [Entity; SIZE] =
             std::array::from_fn(|i| self.registry.find_or_register_component(&T::DESCRIPTORS[i]));
 
@@ -58,11 +58,10 @@ impl<'a> RegistryHeader<'a> {
         })
     }
 
-    pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
-        let value: Option<ErasedRef<'_>> = self
-            .registry
+    pub fn get<T: Component>(&self, entity: Entity) -> Result<&T, RegistryError> {
+        self.registry
             .get_one_component(entity, T::DESCRIPTOR.identity)
-            .into();
-        value.map(|c| c.cast::<T>())
+            .as_result()
+            .map(|c| c.cast::<T>())
     }
 }

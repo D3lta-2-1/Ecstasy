@@ -1,7 +1,7 @@
-use reflexion::{erased::ErasedMutPointer, ffi_slice::FfiSlice};
+use reflexion::erased::ErasedMutPointer;
 use registry_ffi::{
     ArchetypeIndex, ColumnIndex, ComponentDescriptor, Entity, EntityLocation, LocalColumnIndex,
-    QueryIndex, RegistryMutHandle,
+    QueryIndex, RegistryError, RegistryMutHandle,
 };
 use std::array;
 
@@ -77,12 +77,16 @@ impl<QUERY: QueryBundle> Query<QUERY> {
         let mut requested_components: Vec<_> = QUERY::DESCRIPTORS
             .as_ref()
             .iter()
-            .map(|c| registry.find_or_register_component(c))
+            .map(|c| {
+                println!("find new component");
+                registry.find_or_register_component(c)
+            })
             .collect();
         requested_components.sort();
         let id = registry.get_query_id(requested_components.as_slice().into());
         let columns = <QUERY::Array<LocalColumnIndex>>::from_fn(|i| {
-            registry.query_get_local_column_index(id, &QUERY::DESCRIPTORS.as_ref()[i].identity)
+            let query = registry.get_query(id);
+            query.get_local_column_index(&QUERY::DESCRIPTORS.as_ref()[i].identity)
         });
         Self {
             id,
@@ -95,32 +99,35 @@ impl<QUERY: QueryBundle> Query<QUERY> {
         &self,
         registry: &mut RegistryMutHandle,
         archetype_index: ArchetypeIndex,
-    ) -> Option<QUERY::Array<ColumnIndex>> {
-        let option: Option<FfiSlice<&ColumnIndex>> = registry
-            .query_get_columns_index(self.id, archetype_index)
-            .into();
-        let columns = option?;
-        Some(<QUERY::Array<ColumnIndex>>::from_fn(|i| {
+    ) -> Result<QUERY::Array<ColumnIndex>, RegistryError> {
+        let query = registry.get_query(self.id);
+        let columns = query
+            .columns_index_for_archetype(archetype_index)
+            .as_result()?;
+        Ok(<QUERY::Array<ColumnIndex>>::from_fn(|i| {
             columns[self.local_to_column_index.as_ref()[i]]
         }))
     }
 
-    pub fn get(&self, registry: &mut RegistryMutHandle, entity: Entity) -> Option<QUERY> {
-        let option: Option<EntityLocation> = registry.location(entity).into();
+    pub fn get(
+        &self,
+        registry: &mut RegistryMutHandle,
+        entity: Entity,
+    ) -> Result<QUERY, RegistryError> {
         let EntityLocation {
             archetype_index,
             entity_index,
-        } = option?;
+        } = registry.location(entity).as_result()?;
         let columns = self.get_columns_in_archetype(registry, archetype_index)?;
         let mut starts = <QUERY::TPointers>::from_fn(|_| ErasedMutPointer::empty());
         unsafe {
-            registry.get_colum_begin(
+            registry.get_column_begin(
                 archetype_index,
                 columns.as_ref().into(),
                 starts.as_mut().into(),
             );
             starts.for_each(|p| *p = p.offset(entity_index));
-            Some(QUERY::build(starts))
+            Ok(QUERY::build(starts))
         }
     }
 }

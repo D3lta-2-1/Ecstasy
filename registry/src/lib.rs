@@ -15,7 +15,10 @@ use reflexion::erased::{ErasedMutPointer, ErasedRef};
 pub use registry_ffi::{
     ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QueryIndex,
 };
-use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use registry_ffi::{
+    Component, ComponentDescriptor, ComponentIdentity, Entity, QueryHandle, QueryVtableExt,
+    RegistryError,
+};
 use std::{iter, iter::zip};
 
 use reflexion::drop_location::DropLocation;
@@ -48,16 +51,6 @@ impl Registry {
         }
     }
 
-    pub fn find_or_register_component(&mut self, component: &ComponentDescriptor) -> Entity {
-        if let Some(e) = self.archetypes.find_component(&component.identity) {
-            e
-        } else {
-            let e = self.create_empty_permanent_entity();
-            self.archetypes.add_new_component_mapping(*component, e);
-            e
-        }
-    }
-
     pub fn create_empty_permanent_entity(&mut self) -> Entity {
         self.entities.allocate_permanent(|entity| {
             self.archetypes.push(
@@ -78,7 +71,6 @@ impl Registry {
         })
     }
 
-    //TODO: Remove the genric used here and make that iterator ABI-safe
     pub fn create_entity<'a>(
         &mut self,
         components: &[Component],
@@ -108,8 +100,7 @@ impl Registry {
         entity: Entity,
         components: &[Component],
         values: impl ExactSizeIterator<Item = DropLocation<'a>>,
-    ) -> Result<(), ()> {
-        //TODO: add proper error handling
+    ) -> Result<(), RegistryError> {
         assert!(
             components
                 .windows(2)
@@ -118,7 +109,10 @@ impl Registry {
         );
         assert!(components.len() > 0);
 
-        let src_location = self.entities.get(entity).ok_or(())?;
+        let src_location = self
+            .entities
+            .get(entity)
+            .ok_or(RegistryError::EntityNotFound)?;
         let src_archetype_index = src_location.archetype_index;
 
         let base_component = self
@@ -157,75 +151,35 @@ impl Registry {
         &'_ self,
         entity: Entity,
         identity: ComponentIdentity,
-    ) -> Option<ErasedRef<'_>> {
-        let loc = self.entities.get(entity)?;
+    ) -> Result<ErasedRef<'_>, RegistryError> {
+        let loc = self
+            .entities
+            .get(entity)
+            .ok_or(RegistryError::EntityNotFound)?;
         self.archetypes.get_component_at(loc, identity)
     }
 
-    pub fn location(&self, entity: Entity) -> Option<EntityLocation> {
-        self.entities.get(entity)
-    }
-
-    /// this function will return the query ID associated with this builder, and create if required
-    /// Queries can't be deleted, they are meant to be used through systems
-    pub fn get_query_id(&mut self, builder: &[Component]) -> QueryIndex {
-        self.queries.insert_query(builder.to_vec(), |builder| {
-            self.archetypes.create_query(builder)
-        })
-    }
-
-    pub fn query_get_local_column_index(
-        &self,
-        query_index: QueryIndex,
-        identity: &ComponentIdentity,
-    ) -> LocalColumnIndex {
-        let query = self.queries.get_query(query_index);
-        *query
-            .accessible_components
-            .get(identity)
-            .expect("this query doesn't contain this component")
-    }
-
-    pub fn query_get_columns_index(
-        &self,
-        query_index: QueryIndex,
-        archetype_index: ArchetypeIndex,
-    ) -> Option<&[ColumnIndex]> {
-        Some(
-            &self
-                .queries
-                .get_query(query_index)
-                .archetypes
-                .get(&archetype_index)?,
-        )
-    }
-
-    //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
-    pub unsafe fn get_colum_begin(
-        &self,
-        archetype_index: ArchetypeIndex,
-        columns: &[ColumnIndex],
-        starts: &mut [ErasedMutPointer],
-    ) -> &[Entity] {
-        unsafe {
-            self.archetypes
-                .get_colum_begin(archetype_index, columns, starts)
-        }
+    pub fn location(&self, entity: Entity) -> Result<EntityLocation, RegistryError> {
+        self.entities
+            .get(entity)
+            .ok_or(RegistryError::EntityNotFound)
     }
 }
 
-use reflexion::{
-    ffi_collection::FfiCollectionIter,
-    ffi_enum::{FfiOption, FfiResult},
-    ffi_slice::FfiSlice,
-};
+use reflexion::{ffi_collection::FfiCollectionIter, ffi_enum::FfiResult, ffi_slice::FfiSlice};
 
 impl registry_ffi::Registry for Registry {
     extern "C" fn find_or_register_component(
         &mut self,
         component: &ComponentDescriptor,
     ) -> Component {
-        self.find_or_register_component(component)
+        if let Some(e) = self.archetypes.find_component(&component.identity) {
+            e
+        } else {
+            let e = self.create_empty_permanent_entity();
+            self.archetypes.add_new_component_mapping(*component, e);
+            e
+        }
     }
 
     extern "C" fn create_empty_entity(&mut self) -> Entity {
@@ -245,7 +199,7 @@ impl registry_ffi::Registry for Registry {
         entity: Entity,
         components: FfiSlice<&Component>,
         values: FfiCollectionIter<DropLocation<'a>>,
-    ) -> FfiResult<(), ()> {
+    ) -> FfiResult<(), RegistryError> {
         self.add_components(entity, components.into(), values)
             .into()
     }
@@ -254,45 +208,36 @@ impl registry_ffi::Registry for Registry {
         &self,
         entity: Entity,
         identity: ComponentIdentity,
-    ) -> FfiOption<ErasedRef<'_>> {
+    ) -> FfiResult<ErasedRef<'_>, RegistryError> {
         self.get_one_component(entity, identity).into()
     }
 
-    extern "C" fn location(&self, entity: Entity) -> FfiOption<EntityLocation> {
+    extern "C" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError> {
         self.location(entity).into()
     }
 
     extern "C" fn get_query_id(&mut self, builder: FfiSlice<&Component>) -> QueryIndex {
-        self.get_query_id(builder.into()).into()
+        self.queries
+            .insert_query(builder.to_vec(), |builder| {
+                self.archetypes.create_query(builder)
+            })
+            .into()
     }
 
-    extern "C" fn query_get_local_column_index(
-        &self,
-        query_index: QueryIndex,
-        identity: &ComponentIdentity,
-    ) -> LocalColumnIndex {
-        self.query_get_local_column_index(query_index, identity)
+    extern "C" fn get_query<'a>(&'a self, id: QueryIndex) -> QueryHandle<'a> {
+        self.queries.get(id).as_handle()
     }
 
-    extern "C" fn query_get_columns_index(
-        &self,
-        query_index: QueryIndex,
-        archetype_index: ArchetypeIndex,
-    ) -> FfiOption<FfiSlice<&ColumnIndex>> {
-        let value: Option<FfiSlice<&ColumnIndex>> = self
-            .query_get_columns_index(query_index, archetype_index)
-            .map(|v| v.into());
-        value.into()
-    }
-
-    unsafe extern "C" fn get_colum_begin<'a>(
+    //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
+    unsafe extern "C" fn get_column_begin<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,
         columns: FfiSlice<&ColumnIndex>,
         starts: FfiSlice<&mut ErasedMutPointer>,
     ) -> FfiSlice<&'a Entity> {
         unsafe {
-            self.get_colum_begin(archetype_index, columns.into(), starts.into())
+            self.archetypes
+                .get_column_begin(archetype_index, columns.into(), starts.into())
                 .into()
         }
     }

@@ -2,7 +2,7 @@ use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMutPointer, ErasedRef},
     ffi_collection::FfiCollectionIter,
-    ffi_enum::{FfiOption, FfiResult},
+    ffi_enum::FfiResult,
     ffi_slice::FfiSlice,
     typeinfo::TypeInfo,
     vtable,
@@ -16,7 +16,7 @@ use std::{
 /// an entity is nothing more than a disguised integer.
 /// Option<Entity> and both entity are guaranty to be the same size, in FFI, 0 is guaranteed to be None
 /// The internal layout of an entity is <generation, 8 bit> | <identifier, 24 bits>
-/// - Generation 0 is never used, and reserved for futur uses.
+/// - Generation 0 is never used, and reserved for future uses.
 /// - Generation 1 is for long living entities such a sized components.
 /// - The remaining generation 2..255 are used for "short living entities"
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -69,7 +69,7 @@ pub type ArchetypeIndex = usize;
 pub type ColumnIndex = usize;
 /// Position of an Entity its ``Archetype``
 pub type EntityIndex = usize;
-/// Postion of a column *inside* a ``Query``
+/// Position of a column *inside* a ``Query``
 pub type LocalColumnIndex = usize;
 /// unique identifier for an ``Query`` in the registry
 pub type QueryIndex = usize;
@@ -84,16 +84,28 @@ pub struct EntityLocation {
 /// a fully qualified component identity, used to get ComponentData from a component path and name.
 /// it also checks that the layout matches to avoid type mismatches.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentIdentity {
-    pub path: *const u8, //consider to upgrade for a Cow
-    pub name: *const u8,
+    pub path: FfiSlice<&'static u8>,
+    pub name: FfiSlice<&'static u8>,
+}
+
+impl Debug for ComponentIdentity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let path = str::from_utf8(&self.path).unwrap_or("[non valid utf8]");
+        let name = str::from_utf8(&self.name).unwrap_or("[non valid utf8]");
+
+        f.debug_struct("ComponentIdentity")
+            .field("path", &path)
+            .field("name", &name)
+            .finish()
+    }
 }
 
 impl ComponentIdentity {
     pub const EMPTY: Self = Self {
-        path: "ecstasy".as_ptr(),
-        name: "empty".as_ptr(),
+        path: FfiSlice::from_str("ecstasy"),
+        name: FfiSlice::from_str("ecstasy"),
     };
 }
 
@@ -101,6 +113,14 @@ impl ComponentIdentity {
 pub struct ComponentDescriptor {
     pub identity: ComponentIdentity,
     pub type_info: TypeInfo,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum RegistryError {
+    EntityNotFound,
+    ComponentNotFound,
+    ArchetypeNotFound,
 }
 
 #[vtable]
@@ -122,28 +142,42 @@ pub trait Registry {
         entity: Entity,
         components: FfiSlice<&Component>,
         values: FfiCollectionIter<DropLocation<'a>>,
-    ) -> FfiResult<(), ()>;
+    ) -> FfiResult<(), RegistryError>;
+    /// get a component from its Identity
+    // TODO: consider update ComponentIdentity for Component
     extern "C" fn get_one_component(
         &self,
         entity: Entity,
         identity: ComponentIdentity,
-    ) -> FfiOption<ErasedRef<'_>>;
-    extern "C" fn location(&self, entity: Entity) -> FfiOption<EntityLocation>;
+    ) -> FfiResult<ErasedRef<'_>, RegistryError>;
+    extern "C" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError>;
+
+    /// this function will return the query ID associated with this builder, and create if required
+    /// Queries can't be deleted, they are meant to be used through systems
     extern "C" fn get_query_id(&mut self, builder: FfiSlice<&Component>) -> QueryIndex;
-    extern "C" fn query_get_local_column_index(
-        &self,
-        query_index: QueryIndex,
-        identity: &ComponentIdentity,
-    ) -> LocalColumnIndex;
-    extern "C" fn query_get_columns_index(
-        &self,
-        query_index: QueryIndex,
-        archetype_index: ArchetypeIndex,
-    ) -> FfiOption<FfiSlice<&ColumnIndex>>;
-    unsafe extern "C" fn get_colum_begin<'a>(
+
+    extern "C" fn get_query<'a>(&'a self, id: QueryIndex) -> QueryHandle<'a>;
+
+    ///write the start of the asked column in the ``start`` parameter, and provide a slice on the associated Entities
+    unsafe extern "C" fn get_column_begin<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,
         columns: FfiSlice<&ColumnIndex>,
         starts: FfiSlice<&mut ErasedMutPointer>,
     ) -> FfiSlice<&'a Entity>;
+}
+
+/// Queries are a way to retrieve all entities/archetypes that match a given set of components
+/// They are able to iterate on all entities as well as doing random access
+/// To improve performances, they define "local column", these local column match each archetype column in a static manner for easier access
+/// each accessible component of the query gets its own local column
+#[vtable]
+pub trait Query {
+    /// return the ``LocalColumnIndex`` of a Component, panic if it doesn't belong to the query
+    extern "C" fn get_local_column_index(&self, identity: &ComponentIdentity) -> LocalColumnIndex;
+    /// return an array that map the LocalColumnIndex to the real column in a given Archetype.
+    extern "C" fn columns_index_for_archetype(
+        &self,
+        archetype_index: ArchetypeIndex,
+    ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError>;
 }

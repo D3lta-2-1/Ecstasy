@@ -10,7 +10,7 @@ use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMutPointer, ErasedRef},
 };
-use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
+use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity, RegistryError};
 use std::{collections::HashMap, iter::zip};
 
 // releasing archetype can be very challenging, for now, they nerver get released
@@ -80,11 +80,17 @@ impl ArchetypeManager {
             entity_index,
         }: EntityLocation,
         component: ComponentIdentity,
-    ) -> Option<ErasedRef<'_>> {
-        let component = self.component_bridge.find_component(&component)?;
-        let map = self.component_location.get(&component)?;
-        let column = map.get(&archetype_index)?.clone();
-        Some(
+    ) -> Result<ErasedRef<'_>, RegistryError> {
+        let component = self
+            .component_bridge
+            .find_component(&component)
+            .ok_or(RegistryError::ComponentNotFound)?;
+        let map = self
+            .component_location
+            .get(&component)
+            .ok_or(RegistryError::EntityNotFound)?;
+        let column = map.get(&archetype_index).expect("internal error").clone();
+        Ok(
             self.archetypes[archetype_index].ref_at(ComponentValueLocation {
                 column,
                 entity_index,
@@ -216,6 +222,8 @@ impl ArchetypeManager {
     /// - long living query, that are stored in the query manager in order to be maintained
     /// - short living query, which will only remain valid as long as archetypes doesn't change
     pub fn create_query(&self, requested_components: Vec<Component>) -> Query {
+        println!("new query with : {:?}", requested_components);
+
         let accessible_components = HashMap::from_iter(
             requested_components
                 .iter()
@@ -224,6 +232,11 @@ impl ArchetypeManager {
                 .flat_map(|component| self.component_bridge.find_identity(&component))
                 .enumerate()
                 .map(|(a, b)| (b, a)),
+        );
+
+        println!(
+            "there are {:?} component accessible",
+            accessible_components.len()
         );
 
         if requested_components.len() == 0 {
@@ -242,6 +255,8 @@ impl ArchetypeManager {
                 .into_iter()
                 .flat_map(HashMap::iter)
                 .flat_map(|(archetype_index, &column_index)| {
+                    // for all archetype that contain the first component
+                    // add the fist component
                     building.clear();
                     if self
                         .component_bridge
@@ -249,6 +264,7 @@ impl ArchetypeManager {
                     {
                         building.push(column_index);
                     }
+                    // try to add all remaining components of the tested archetype if they exist
                     for other_component in &requested_components[1..] {
                         let map = self.component_location.get(other_component)?;
                         let pos = map.get(archetype_index)?;
@@ -260,6 +276,8 @@ impl ArchetypeManager {
                 }),
         );
 
+        println!("new query with {} archetypes", archetypes.len());
+
         Query {
             requested_components,
             accessible_components,
@@ -268,12 +286,12 @@ impl ArchetypeManager {
     }
 
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
-    pub unsafe fn get_colum_begin(
+    pub unsafe fn get_column_begin(
         &self,
         archetype_index: ArchetypeIndex,
         columns: &[ColumnIndex],
         starts: &mut [ErasedMutPointer],
     ) -> &[Entity] {
-        unsafe { self.archetypes[archetype_index].get_colum_begin(columns, starts) }
+        unsafe { self.archetypes[archetype_index].get_column_begin(columns, starts) }
     }
 }

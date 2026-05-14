@@ -1,4 +1,5 @@
 use std::{
+    hash::Hash,
     ops::{Deref, DerefMut},
     ptr::NonNull,
     slice,
@@ -24,33 +25,79 @@ pub struct FfiSlice<T: Ref> {
     len: usize,
 }
 
-impl<'a, T> From<&'a [T]> for FfiSlice<&'a T> {
-    fn from(value: &[T]) -> Self {
+impl<'a, T> FfiSlice<&T> {
+    pub const fn from_slice(slice: &[T]) -> Self {
         Self {
-            data: NonNull::new(value.as_ptr() as *mut T).unwrap(),
-            len: value.len(),
+            data: NonNull::new(slice.as_ptr() as *mut T).unwrap(),
+            len: slice.len(),
         }
+    }
+}
+
+impl<'a> FfiSlice<&u8> {
+    pub const fn from_str(slice: &str) -> Self {
+        Self::from_slice(slice.as_bytes())
+    }
+}
+
+impl<'a, T> FfiSlice<&mut T> {
+    pub const fn from_slice(slice: &mut [T]) -> Self {
+        Self {
+            data: NonNull::new(slice.as_ptr() as *mut T).unwrap(),
+            len: slice.len(),
+        }
+    }
+}
+
+impl<'a, T> Clone for FfiSlice<&'a T> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            len: self.len.clone(),
+        }
+    }
+}
+
+impl<'a, T> Copy for FfiSlice<&'a T> {}
+
+impl<'a, T: PartialEq> PartialEq for FfiSlice<&'a T> {
+    fn eq(&self, other: &Self) -> bool {
+        let a: &'a [T] = self.clone().into();
+        let b: &'a [T] = other.clone().into();
+        a == b
+    }
+}
+
+impl<'a, T: Eq> Eq for FfiSlice<&'a T> {}
+
+impl<'a, T: Hash> Hash for FfiSlice<&'a T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let slice: &'a [T] = self.clone().into();
+        slice.hash(state);
+    }
+}
+
+impl<'a, T> From<&'a [T]> for FfiSlice<&'a T> {
+    fn from(slice: &[T]) -> Self {
+        Self::from_slice(slice)
     }
 }
 
 impl<'a, T> From<FfiSlice<&'a T>> for &'a [T] {
-    fn from(value: FfiSlice<&T>) -> Self {
-        unsafe { slice::from_raw_parts(value.data.as_ptr(), value.len) }
+    fn from(slice: FfiSlice<&T>) -> Self {
+        unsafe { slice::from_raw_parts(slice.data.as_ptr(), slice.len) }
     }
 }
 
 impl<'a, T> From<&'a mut [T]> for FfiSlice<&'a mut T> {
-    fn from(value: &mut [T]) -> Self {
-        Self {
-            data: NonNull::new(value.as_mut_ptr()).unwrap(),
-            len: value.len(),
-        }
+    fn from(slice: &mut [T]) -> Self {
+        Self::from_slice(slice)
     }
 }
 
 impl<'a, T> From<FfiSlice<&'a mut T>> for &'a mut [T] {
-    fn from(value: FfiSlice<&mut T>) -> Self {
-        unsafe { slice::from_raw_parts_mut(value.data.as_ptr(), value.len) }
+    fn from(slice: FfiSlice<&mut T>) -> Self {
+        unsafe { slice::from_raw_parts_mut(slice.data.as_ptr(), slice.len) }
     }
 }
 

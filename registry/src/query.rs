@@ -1,12 +1,13 @@
 use crate::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
-use registry_ffi::{Component, ComponentIdentity, LocalColumnIndex};
+use reflexion::{ffi_enum::FfiResult, ffi_slice::FfiSlice};
+use registry_ffi::{Component, ComponentIdentity, LocalColumnIndex, RegistryError};
 use std::collections::HashMap;
 
 /// a Query is a shortcut to access archetypes, being part of the registry storage, that share common properties
 /// a Query is able to quickly find all column that contain sized component
 pub struct Query {
     pub(crate) requested_components: Vec<Component>, // contain all components, even unsized components
-    pub(crate) accessible_components: HashMap<ComponentIdentity, LocalColumnIndex>, // only keep sized components,
+    pub(crate) accessible_components: HashMap<ComponentIdentity, LocalColumnIndex>, // only keep sized components, should I store the "associated components instead ?"
     pub(crate) archetypes: HashMap<ArchetypeIndex, Vec<ColumnIndex>>, //where stuff is located in the archetype.
 }
 
@@ -25,9 +26,31 @@ impl Query {
             let component = archetypes
                 .find_component(component)
                 .expect("this archetype don't match the query requirements");
-            let colum = archetypes.find_column(component, archetype_index);
-            mapping[*local_index] = colum;
+            let column = archetypes.find_column(component, archetype_index);
+            mapping[*local_index] = column;
         }
         self.archetypes.insert(archetype_index, mapping);
+    }
+}
+
+impl registry_ffi::Query for Query {
+    extern "C" fn get_local_column_index(&self, identity: &ComponentIdentity) -> LocalColumnIndex {
+        self.accessible_components
+            .get(identity)
+            .expect("this component isn't part of the query")
+            .clone()
+    }
+
+    extern "C" fn columns_index_for_archetype(
+        &self,
+        archetype_index: ArchetypeIndex,
+    ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError> {
+        
+
+        self.archetypes
+            .get(&archetype_index)
+            .map(|v| v.as_slice().into())
+            .ok_or(RegistryError::ArchetypeNotFound)
+            .into()
     }
 }

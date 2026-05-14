@@ -125,7 +125,7 @@ impl Archetype {
         RemoveIterator::<'a>::new(self, location)
     }
 
-    pub unsafe fn get_colum_begin(
+    pub unsafe fn get_column_begin(
         &self,
         columns: &[ColumnIndex],
         starts: &mut [ErasedMutPointer],

@@ -23,8 +23,13 @@ impl<T, E> From<FfiResult<T, E>> for Result<T, E> {
     }
 }
 
-/// if ``FfiOption`` can be used everywhere safely, but it disable Null pointer optimisation
-/// when the contained object can use the null pointer optimisation, it's worth using std::Option instead
+impl<T, E> FfiResult<T, E> {
+    pub fn as_result(self) -> Result<T, E> {
+        self.into()
+    }
+}
+
+/// ffi safe Option type, standard option can still be used on pointer type and references.
 #[repr(C)]
 pub enum FfiOption<T> {
     Some(T),
@@ -46,5 +51,11 @@ impl<T> From<FfiOption<T>> for Option<T> {
             FfiOption::Some(v) => Some(v),
             FfiOption::None => None,
         }
+    }
+}
+
+impl<T> FfiOption<T> {
+    pub fn as_option(self) -> Option<T> {
+        self.into()
     }
 }

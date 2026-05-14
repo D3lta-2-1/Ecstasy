@@ -50,10 +50,6 @@ impl QueryManager {
         index
     }
 
-    pub fn get_query(&self, index: QueryIndex) -> &Query {
-        &self.queries[index]
-    }
-
     pub fn add_archetype(
         &mut self,
         archetype_index: ArchetypeIndex,
@@ -67,5 +63,9 @@ impl QueryManager {
                 query.add_archetype(archetype_index, archetypes);
             }
         }
+    }
+
+    pub fn get(&self, id: QueryIndex) -> &Query {
+        &self.queries[id]
     }
 }

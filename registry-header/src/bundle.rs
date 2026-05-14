@@ -1,5 +1,5 @@
 use paste::paste;
-use reflexion::{drop_location::DropLocation, typeinfo::TypeInfoProvider};
+use reflexion::{drop_location::DropLocation, ffi_slice::FfiSlice, typeinfo::TypeInfoProvider};
 use registry_ffi::{ComponentDescriptor, ComponentIdentity};
 use std::mem;
 
@@ -8,8 +8,8 @@ pub trait Component: TypeInfoProvider {
     const NAME: &'static str;
     const DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
         identity: ComponentIdentity {
-            path: Self::PATH.as_ptr(),
-            name: Self::NAME.as_ptr(),
+            path: FfiSlice::from_str(Self::PATH),
+            name: FfiSlice::from_str(Self::NAME),
         },
         type_info: Self::TYPE_INFO,
     };

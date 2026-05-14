@@ -35,9 +35,9 @@ fn creation() {
     let vel = registry.get::<Vel>(e1).cloned();
     let pos2 = registry.get::<Pos>(e2).cloned();
 
-    assert_eq!(pos1, Some(Pos { x: 0.0, y: 0.0 }));
-    assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
-    assert_eq!(pos2, Some(Pos { x: 3.0, y: 6.0 }));
+    assert_eq!(pos1, Ok(Pos { x: 0.0, y: 0.0 }));
+    assert_eq!(vel, Ok(Vel { x: 1.0, y: 1.0 }));
+    assert_eq!(pos2, Ok(Pos { x: 3.0, y: 6.0 }));
 }
 
 #[test]
@@ -49,8 +49,8 @@ fn addition_no_overwrite() {
 
     let pos = registry.get::<Pos>(e).cloned();
     let vel = registry.get::<Vel>(e).cloned();
-    assert_eq!(pos, Some(Pos { x: 3.0, y: 6.0 }));
-    assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
+    assert_eq!(pos, Ok(Pos { x: 3.0, y: 6.0 }));
+    assert_eq!(vel, Ok(Vel { x: 1.0, y: 1.0 }));
 }
 
 #[test]
@@ -62,12 +62,12 @@ fn addition_with_overwrite() {
 
     let pos = registry.get::<Pos>(e).cloned();
     let vel = registry.get::<Vel>(e).cloned();
-    assert_eq!(pos, Some(Pos { x: 3.0, y: 6.0 }));
-    assert_eq!(vel, Some(Vel { x: 1.0, y: 1.0 }));
+    assert_eq!(pos, Ok(Pos { x: 3.0, y: 6.0 }));
+    assert_eq!(vel, Ok(Vel { x: 1.0, y: 1.0 }));
 }
 
 // FIXME: this test doesn't pass anymore !
-/*#[test]
+#[test]
 fn query() {
     let mut registry_impl = Registry::new();
     let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
@@ -78,4 +78,4 @@ fn query() {
     let (pos, vel) = query.get(registry.handle(), e1).unwrap();
     assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
     assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
-}*/
+}

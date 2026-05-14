@@ -72,7 +72,7 @@ impl EntityManager {
         entity
     }
 
-    /// mark this ID a free for futur uses, return the previous location if any
+    /// mark this ID a free for future uses, return the previous location if any
     pub fn free(&mut self, entity: Entity) -> Option<EntityLocation> {
         assert_ne!(entity.generation(), 1, "this entity can't be deleted");
         let value = self
