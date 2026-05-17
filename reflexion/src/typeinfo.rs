@@ -40,7 +40,7 @@ impl From<Layout> for std::alloc::Layout {
 #[derive(Debug)]
 pub struct TypeInfoImpl {
     pub layout: Layout,
-    pub destructor: unsafe fn(*mut u8),
+    pub destructor: unsafe extern "C" fn(*mut u8),
 }
 
 pub type TypeInfo = Option<&'static TypeInfoImpl>;
@@ -60,7 +60,7 @@ impl Hash for TypeInfoImpl {
 }
 
 impl TypeInfoImpl {
-    pub unsafe fn destructor<T>(to_drop: *mut u8) {
+    pub unsafe extern "C" fn destructor<T>(to_drop: *mut u8) {
         unsafe {
             std::ptr::drop_in_place(to_drop);
         }

@@ -123,6 +123,19 @@ pub enum RegistryError {
     ArchetypeNotFound,
 }
 
+#[repr(C)]
+pub struct QueryBuilder<'a> {
+    /// both slices must be the same size, on contain
+    requested_components: FfiSlice<&'a Component>,
+    mutabilities: FfiSlice<&'a bool>,
+}
+
+#[repr(C)]
+pub struct SystemBuilder<'a> {
+    queries: FfiSlice<&'a QueryBuilder<'a>>,
+    executor: extern "C" fn(PluginHandle, FfiSlice<QueryHandle>),
+}
+
 #[vtable]
 pub trait Registry {
     /// Find the Entity that represent a given component
@@ -154,7 +167,8 @@ pub trait Registry {
 
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
-    extern "C" fn get_query_id(&mut self, builder: FfiSlice<&Component>) -> QueryIndex;
+    extern "C" fn get_query_id(&mut self, requested_components: FfiSlice<&Component>)
+    -> QueryIndex;
 
     extern "C" fn get_query<'a>(&'a self, id: QueryIndex) -> QueryHandle<'a>;
 
@@ -180,4 +194,13 @@ pub trait Query {
         &self,
         archetype_index: ArchetypeIndex,
     ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError>;
+}
+
+/// A Plugin is an "endpoint in the ECS, it mainly store crate-local information"
+#[vtable]
+pub trait Plugin {}
+
+#[vtable]
+pub trait SystemExecutor {
+    extern "C" fn call(&mut self, handle: PluginHandle, queries: FfiSlice<&QueryHandle>);
 }

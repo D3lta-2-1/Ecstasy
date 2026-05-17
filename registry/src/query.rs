@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// a Query is a shortcut to access archetypes, being part of the registry storage, that share common properties
 /// a Query is able to quickly find all column that contain sized component
+/// it gather all archetype that share a common set of components, but doesn't care about mutability
 pub struct Query {
     pub(crate) requested_components: Vec<Component>, // contain all components, even unsized components
     pub(crate) accessible_components: HashMap<ComponentIdentity, LocalColumnIndex>, // only keep sized components, should I store the "associated components instead ?"
@@ -45,8 +46,6 @@ impl registry_ffi::Query for Query {
         &self,
         archetype_index: ArchetypeIndex,
     ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError> {
-        
-
         self.archetypes
             .get(&archetype_index)
             .map(|v| v.as_slice().into())

@@ -1,4 +1,5 @@
 pub mod bundle;
+pub mod plugin;
 pub mod query;
 
 pub use crate::bundle::{Component, StaticBundle};

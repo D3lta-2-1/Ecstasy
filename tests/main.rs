@@ -66,7 +66,6 @@ fn addition_with_overwrite() {
     assert_eq!(vel, Ok(Vel { x: 1.0, y: 1.0 }));
 }
 
-// FIXME: this test doesn't pass anymore !
 #[test]
 fn query() {
     let mut registry_impl = Registry::new();

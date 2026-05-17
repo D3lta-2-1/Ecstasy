@@ -3,6 +3,7 @@ mod archetype_manager;
 mod component_bridge;
 mod entity_manager;
 mod merge_iter;
+mod plugin;
 mod query;
 mod query_manager;
 

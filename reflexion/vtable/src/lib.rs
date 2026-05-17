@@ -21,7 +21,7 @@ impl MemberFunctionSignature {
         let name = signature.ident;
 
         if let Some(asyncness) = signature.asyncness {
-            return Err(build_eror(
+            return Err(build_error(
                 asyncness.span,
                 "async function remain unsupported",
             ));
@@ -31,25 +31,25 @@ impl MemberFunctionSignature {
             GenericParam::Lifetime(_) => false,
             _ => true,
         }) {
-            return Err(build_eror(
+            return Err(build_error(
                 name.span(),
                 "type and const generic are forbidden",
             ));
         }
 
         let abi = match signature.abi {
-            None => Err(build_eror(name.span(), "ABI must be explicitly specified")),
+            None => Err(build_error(name.span(), "ABI must be explicitly specified")),
             Some(syn::Abi {
                 name: None,
                 extern_token,
-            }) => Err(build_eror(
+            }) => Err(build_error(
                 extern_token.span,
                 "ABI must be explicitly specified",
             )),
             Some(syn::Abi {
                 name: Some(abi_name),
                 ..
-            }) if abi_name.value() == "rust" => Err(build_eror(
+            }) if abi_name.value() == "rust" => Err(build_error(
                 abi_name.span(),
                 "rust ABI is unstable and therefor can't be used",
             )),
@@ -60,18 +60,18 @@ impl MemberFunctionSignature {
         }?;
 
         let (mutability, lifetime) = match signature.inputs.first() {
-            None => Err(build_eror(
+            None => Err(build_error(
                 name.span(),
                 "function without any parameters aren't allowed",
             )),
-            Some(FnArg::Typed(_)) => Err(build_eror(
+            Some(FnArg::Typed(_)) => Err(build_error(
                 name.span(),
                 "only methods are authorized, add `&self` or `&mut self` to the signature",
             )),
             Some(FnArg::Receiver(syn::Receiver {
                 colon_token: Some(token),
                 ..
-            })) => Err(build_eror(
+            })) => Err(build_error(
                 token.span,
                 "only `&self` or `&mut self` are authorized",
             )),
@@ -79,7 +79,7 @@ impl MemberFunctionSignature {
                 reference: None,
                 self_token,
                 ..
-            })) => Err(build_eror(
+            })) => Err(build_error(
                 self_token.span,
                 "only `&self` or `&mut self` are authorized",
             )),
@@ -131,7 +131,7 @@ impl MemberFunctionSignature {
         let impl_generics = (!lifetimes.is_empty()).then_some(quote! {for<#(#lifetimes,)*>});
 
         quote! {
-            #name: #impl_generics #unsafe_token extern #abi fn(& #self_lifetime #mut_token #opaque_ident, #(#param,)* ) #output,
+            pub #name: #impl_generics #unsafe_token extern #abi fn(& #self_lifetime #mut_token #opaque_ident, #(#param,)* ) #output,
         }
     }
 
@@ -157,7 +157,7 @@ impl MemberFunctionSignature {
     }
 }
 
-struct ExpensionBuilder {
+struct ExpansionBuilder {
     name: Ident,
     vtable_name: Ident,
     opaque_type: Ident,
@@ -166,12 +166,12 @@ struct ExpensionBuilder {
 
 type Result<T> = std::result::Result<T, TokenStream>;
 
-fn build_eror(span: Span, txt: impl AsRef<str>) -> TokenStream {
+fn build_error(span: Span, txt: impl AsRef<str>) -> TokenStream {
     let txt = txt.as_ref();
     quote_spanned! { span => compile_error!(#txt) }.into()
 }
 
-impl ExpensionBuilder {
+impl ExpansionBuilder {
     fn new(item_trait: ItemTrait) -> Result<Self> {
         let name = item_trait.ident;
         let methods: Result<Vec<_>> = item_trait
@@ -232,7 +232,7 @@ impl ExpensionBuilder {
 }
 
 fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
-    let builder = ExpensionBuilder::new(input.clone())?;
+    let builder = ExpansionBuilder::new(input.clone())?;
 
     let name = &builder.name;
     let opaque_type = &builder.opaque_type;
@@ -250,18 +250,43 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
     let expanded = quote! {
         #input
 
+        #[doc = "An abstract type to create pointers and references to objects that implements ``#name``"]
         #[repr(C)]
         pub struct #opaque_type {
             _data: (),
             _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
         }
 
+        impl ::reflexion::opaque::Opaque for #opaque_type {
+            type Handle<'a> = #handle<'a>;
+            type MutHandle<'a> = #mut_handle<'a>;
+            type Vtable = #vtable_name;
+
+            unsafe fn handle<'a>(handle: *const Self, vtable:  &'static Self::Vtable) -> Self::Handle<'a> {
+                unsafe {
+                    #handle {
+                        handle: &*handle,
+                        vtable,
+                    }
+                }
+            }
+
+            unsafe fn mut_handle<'a>(handle: *mut Self, vtable:  &'static Self::Vtable) -> Self::MutHandle<'a> {
+                unsafe {
+                    #mut_handle {
+                        handle: &mut *handle,
+                        vtable,
+                    }
+                }
+            }
+        }
+
         #[repr(C)]
-        struct #vtable_name {
+        pub struct #vtable_name {
             #vtable_fields
         }
 
-        pub trait #trait_ext_name : #name {
+        pub trait #trait_ext_name : #name + Sized {
             const VTABLE: #vtable_name = unsafe { #vtable_name {
                 #(#method_names: ::std::mem::transmute(Self::#method_names as *const ()),)*
             }};
@@ -283,6 +308,12 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
                         handle: &mut *handle,
                         vtable: &Self::VTABLE,
                     }
+                }
+            }
+
+            fn boxed(self) -> ::reflexion::ffi_box::FfiBox<#opaque_type> {
+                unsafe {
+                    <::reflexion::ffi_box::FfiBox<#opaque_type>>::new(self, &Self::VTABLE)
                 }
             }
         }
@@ -308,6 +339,18 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
 
         impl #handle<'_> {
             #handle_methods
+
+            // TODO: Find a proper way to secure downcasting
+            /*pub fn downcast<T: #name>(self) -> Option<&'a T> {
+                if T::VTABLE == *self.vtable {
+                    unsafe {
+                        let ptr = self.handle as *const #opaque_type as *const T;
+                        Some(&*ptr)
+                    }
+                } else {
+                    None
+                }
+            }*/
         }
 
     };
@@ -315,7 +358,7 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
 }
 
 /// a utility macro to build explicit vtable for any trait,
-/// the given trait should only containt "methods" shloudn't use async functions
+/// the given trait should only contain "methods" shloudn't use async functions
 // TODO: add support for functions where self appear multiple times ! which remaing unsupported for now
 #[proc_macro_attribute]
 pub fn vtable(
