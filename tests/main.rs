@@ -1,6 +1,6 @@
 use registry::Registry;
 use registry_ffi::RegistryVtableExt;
-use registry_header::{Component, RegistryHeader, query::Query};
+use registry_header::{Component, RegistryHeader, query::QueryHeaderData};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Pos {
@@ -73,8 +73,9 @@ fn query() {
     let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
     let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
 
-    let query = Query::<(&Pos, &Vel)>::new(registry.handle());
-    let (pos, vel) = query.get(registry.handle(), e1).unwrap();
+    let query = QueryHeaderData::<(&Pos, &Vel)>::new(registry.mut_handle());
+    let handle = registry.mut_handle();
+    let (pos, vel) = query.get(handle.as_const(), e1).unwrap();
     assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
     assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
 }

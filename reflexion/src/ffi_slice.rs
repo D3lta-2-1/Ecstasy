@@ -101,18 +101,6 @@ impl<'a, T> From<FfiSlice<&'a mut T>> for &'a mut [T] {
     }
 }
 
-impl<'a, T> AsRef<[T]> for FfiSlice<&'a T> {
-    fn as_ref(&self) -> &[T] {
-        unsafe { slice::from_raw_parts(self.data.as_ptr(), self.len) }
-    }
-}
-
-impl<'a, T> AsMut<[T]> for FfiSlice<&'a mut T> {
-    fn as_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(self.data.as_ptr(), self.len) }
-    }
-}
-
 impl<'a, T> Deref for FfiSlice<&'a T> {
     type Target = [T];
 

@@ -327,6 +327,15 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
         }
 
         impl #mut_handle<'_> {
+            pub fn as_const(&self) -> #handle  {
+                #handle {
+                    handle: &self.handle,
+                    vtable: &self.vtable,
+                }
+            }
+        }
+
+        impl #mut_handle<'_> {
             #mut_handle_methods
         }
 
@@ -337,20 +346,15 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
             vtable: &'static #vtable_name,
         }
 
-        impl #handle<'_> {
+        impl<'handle_lifetime> #handle<'handle_lifetime> {
             #handle_methods
 
-            // TODO: Find a proper way to secure downcasting
-            /*pub fn downcast<T: #name>(self) -> Option<&'a T> {
-                if T::VTABLE == *self.vtable {
-                    unsafe {
-                        let ptr = self.handle as *const #opaque_type as *const T;
-                        Some(&*ptr)
-                    }
-                } else {
-                    None
+            pub unsafe fn downcast<T: #name>(self) -> &'handle_lifetime T {
+                unsafe {
+                    let ptr = self.handle as *const #opaque_type as *const T;
+                    &*ptr
                 }
-            }*/
+            }
         }
 
     };

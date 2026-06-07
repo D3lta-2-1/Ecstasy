@@ -2,8 +2,8 @@ mod archetype;
 mod archetype_manager;
 mod component_bridge;
 mod entity_manager;
+mod index_storage;
 mod merge_iter;
-mod plugin;
 mod query;
 mod query_manager;
 
@@ -14,11 +14,11 @@ use query_manager::QueryManager;
 use reflexion::erased::{ErasedMutPointer, ErasedRef};
 
 pub use registry_ffi::{
-    ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QueryIndex,
+    ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QuerySetIndex,
 };
 use registry_ffi::{
-    Component, ComponentDescriptor, ComponentIdentity, Entity, QueryHandle, QueryVtableExt,
-    RegistryError,
+    Component, ComponentDescriptor, ComponentIdentity, Entity, Query, QueryBuilder, QuerySetHandle,
+    QuerySetVtableExt, RegistryError,
 };
 use std::{iter, iter::zip};
 
@@ -217,19 +217,17 @@ impl registry_ffi::Registry for Registry {
         self.location(entity).into()
     }
 
-    extern "C" fn get_query_id(&mut self, builder: FfiSlice<&Component>) -> QueryIndex {
+    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> Query {
         self.queries
-            .insert_query(builder.to_vec(), |builder| {
-                self.archetypes.create_query(builder)
-            })
-            .into()
+            .get_query(builder, |builder| self.archetypes.create_query(builder))
     }
 
-    extern "C" fn get_query<'a>(&'a self, id: QueryIndex) -> QueryHandle<'a> {
-        self.queries.get(id).as_handle()
+    extern "C" fn get_query<'a>(&'a self, id: QuerySetIndex) -> QuerySetHandle<'a> {
+        self.queries.get_query_set(id).as_handle()
     }
 
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
+    // I'm considering adding atomis in the ECS to explicitly catch case where the same column is borrowed twice
     unsafe extern "C" fn get_column_begin<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,

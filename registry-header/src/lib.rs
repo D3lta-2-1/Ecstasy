@@ -1,10 +1,10 @@
 pub mod bundle;
-pub mod plugin;
+pub mod system;
 pub mod query;
 
 pub use crate::bundle::{Component, StaticBundle};
 use reflexion::ffi_collection::FfiCollectionIter;
-use registry_ffi::{Entity, RegistryError, RegistryMutHandle};
+use registry_ffi::{Entity, RegistryError, RegistryHandle, RegistryMutHandle};
 
 /// the registry header is the final interface between the ECS internal and "external" world.
 /// it's where all clean generic methods are defined
@@ -19,7 +19,7 @@ impl<'a> RegistryHeader<'a> {
         Self { registry: handle }
     }
 
-    pub fn handle(&mut self) -> &mut RegistryMutHandle<'a> {
+    pub fn mut_handle(&mut self) -> &mut RegistryMutHandle<'a> {
         &mut self.registry
     }
 

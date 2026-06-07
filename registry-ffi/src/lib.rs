@@ -63,16 +63,53 @@ impl Debug for Entity {
 
 /// an alias for readability when an entity is used as a component
 pub type Component = Entity;
-/// unique identifier for an ``Archetype`` in the registry
-pub type ArchetypeIndex = usize;
-/// Index of a column in an ``Archetype``
-pub type ColumnIndex = usize;
-/// Position of an Entity its ``Archetype``
-pub type EntityIndex = usize;
-/// Position of a column *inside* a ``Query``
-pub type LocalColumnIndex = usize;
-/// unique identifier for an ``Query`` in the registry
-pub type QueryIndex = usize;
+
+macro_rules! create_index {
+    // This macro takes an argument of designator `ident` and
+    // creates a function named `$func_name`.
+    // The `ident` designator is used for variable/function names.
+    ($type_name:ident, $doc:literal) => {
+        #[repr(transparent)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[doc = $doc]
+        pub struct $type_name(pub usize);
+
+        impl From<$type_name> for usize {
+            fn from($type_name(v): $type_name) -> Self {
+                v
+            }
+        }
+
+        impl From<usize> for $type_name {
+            fn from(v: usize) -> Self {
+                $type_name(v)
+            }
+        }
+    };
+}
+
+create_index!(
+    ArchetypeIndex,
+    "unique identifier for an ``Archetype`` in the registry"
+);
+create_index!(ColumnIndex, "Index of a column in an ``Archetype``");
+create_index!(EntityIndex, "Position of an Entity its ``Archetype``");
+create_index!(
+    LocalColumnIndex,
+    "Position of a column *inside* a ``Query``"
+);
+create_index!(
+    QuerySetIndex,
+    "unique identifier for a ``QuerySet`` in the registry"
+);
+create_index!(QueryMutabilityIndex, "a unique identifier for a ``Query``");
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Query {
+    pub set: QuerySetIndex,
+    pub mutability: QueryMutabilityIndex,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -123,19 +160,6 @@ pub enum RegistryError {
     ArchetypeNotFound,
 }
 
-#[repr(C)]
-pub struct QueryBuilder<'a> {
-    /// both slices must be the same size, on contain
-    requested_components: FfiSlice<&'a Component>,
-    mutabilities: FfiSlice<&'a bool>,
-}
-
-#[repr(C)]
-pub struct SystemBuilder<'a> {
-    queries: FfiSlice<&'a QueryBuilder<'a>>,
-    executor: extern "C" fn(PluginHandle, FfiSlice<QueryHandle>),
-}
-
 #[vtable]
 pub trait Registry {
     /// Find the Entity that represent a given component
@@ -167,10 +191,9 @@ pub trait Registry {
 
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
-    extern "C" fn get_query_id(&mut self, requested_components: FfiSlice<&Component>)
-    -> QueryIndex;
+    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> Query;
 
-    extern "C" fn get_query<'a>(&'a self, id: QueryIndex) -> QueryHandle<'a>;
+    extern "C" fn get_query<'a>(&'a self, id: QuerySetIndex) -> QuerySetHandle<'a>;
 
     ///write the start of the asked column in the ``start`` parameter, and provide a slice on the associated Entities
     unsafe extern "C" fn get_column_begin<'a>(
@@ -185,8 +208,9 @@ pub trait Registry {
 /// They are able to iterate on all entities as well as doing random access
 /// To improve performances, they define "local column", these local column match each archetype column in a static manner for easier access
 /// each accessible component of the query gets its own local column
+/// it's the caller responsibility to respects the mutability he asked for
 #[vtable]
-pub trait Query {
+pub trait QuerySet {
     /// return the ``LocalColumnIndex`` of a Component, panic if it doesn't belong to the query
     extern "C" fn get_local_column_index(&self, identity: &ComponentIdentity) -> LocalColumnIndex;
     /// return an array that map the LocalColumnIndex to the real column in a given Archetype.
@@ -196,11 +220,23 @@ pub trait Query {
     ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError>;
 }
 
-/// A Plugin is an "endpoint in the ECS, it mainly store crate-local information"
-#[vtable]
-pub trait Plugin {}
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ComponentMutability {
+    Const,
+    Mut,
+}
 
+#[repr(C)]
+pub struct QueryBuilder<'a> {
+    /// both slices must be the same size, on contain
+    pub requested_components: FfiSlice<&'a Component>,
+    pub mutabilities: FfiSlice<&'a ComponentMutability>,
+}
+
+/// Used to represent a system in the ECS, the system have to be honest, and precisely use the Queries it asked for
 #[vtable]
-pub trait SystemExecutor {
-    extern "C" fn call(&mut self, handle: PluginHandle, queries: FfiSlice<&QueryHandle>);
+pub trait System {
+    extern "C" fn call(&mut self, registry_handle: RegistryHandle);
+    extern "C" fn query_list(&self) -> FfiSlice<&Query>;
 }

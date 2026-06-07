@@ -59,11 +59,11 @@ impl Archetype {
         let new_size = self.capacity() + additional;
         let len = self.len();
         unsafe {
-            for columm in self.columns.iter_mut() {
+            for column in self.columns.iter_mut() {
                 if len == 0 {
-                    columm.allocate(new_size);
+                    column.allocate(new_size);
                 } else {
-                    columm.reallocate(new_size);
+                    column.reallocate(new_size);
                 }
             }
         }
@@ -99,23 +99,23 @@ impl Archetype {
             }
         }
         self.entities.push(id);
-        Ok(location)
+        Ok(EntityIndex(location))
     }
 
     pub fn ref_at<'a>(&'a self, location: ComponentValueLocation) -> ErasedRef<'a> {
-        assert!(location.entity_index < self.len(), "out of range");
+        assert!(location.entity_index.0 < self.len(), "out of range");
         unsafe {
-            self.columns[location.column]
-                .offset(location.entity_index)
+            self.columns[location.column.0]
+                .offset(location.entity_index.0)
                 .as_erased_ref::<'a>()
         }
     }
 
     pub fn mut_at<'a>(&'a mut self, location: ComponentValueLocation) -> ErasedMut<'a> {
-        assert!(location.entity_index < self.len(), "out of range");
+        assert!(location.entity_index.0 < self.len(), "out of range");
         unsafe {
-            self.columns[location.column]
-                .offset(location.entity_index)
+            self.columns[location.column.0]
+                .offset(location.entity_index.0)
                 .as_erased_mut::<'a>()
         }
     }
@@ -131,7 +131,7 @@ impl Archetype {
         starts: &mut [ErasedMutPointer],
     ) -> &[Entity] {
         for (start, index) in starts.iter_mut().zip(columns) {
-            *start = self.columns[*index];
+            *start = self.columns[index.0];
         }
         &self.entities
     }
@@ -189,7 +189,7 @@ impl<'a> Iterator for RemoveIterator<'a> {
         }
 
         let value = unsafe {
-            let location = self.archetype.columns[self.i].offset(self.location);
+            let location = self.archetype.columns[self.i].offset(self.location.0);
             (
                 self.archetype.components[self.i],
                 DropLocation::at(location),
@@ -214,12 +214,12 @@ impl<'a> Drop for RemoveIterator<'a> {
             for column in self.archetype.columns[0..self.i].iter().cloned() {
                 unsafe {
                     column
-                        .offset(self.location)
+                        .offset(self.location.0)
                         .copy_nonoverlapping_from(column.offset(len))
                 };
             }
         }
-        self.archetype.entities.swap_remove(self.location);
+        self.archetype.entities.swap_remove(self.location.0);
     }
 }
 

@@ -1,3 +1,0 @@
-struct SystemBuilder {}
-
-struct Plugin {}

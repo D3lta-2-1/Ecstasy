@@ -2,21 +2,24 @@ use crate::{
     ArchetypeIndex, ColumnIndex, EntityLocation, MovedEntity,
     archetype::{Archetype, ComponentValueLocation},
     component_bridge::ComponentIdentityBridge,
+    index_storage::IndexStorage,
     merge_iter::MergeIter,
-    query::Query,
+    query::QuerySet,
     query_manager::QueryManager,
 };
 use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMutPointer, ErasedRef},
 };
-use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity, RegistryError};
+use registry_ffi::{
+    Component, ComponentDescriptor, ComponentIdentity, Entity, LocalColumnIndex, RegistryError,
+};
 use std::{collections::HashMap, iter::zip};
 
-// releasing archetype can be very challenging, for now, they nerver get released
+// releasing archetype can be very challenging, for now, they never get freed
 pub struct ArchetypeManager {
     // store the archetypes, each archetype is a collection of entities with the same components
-    archetypes: Vec<Archetype>, // TODO: promote that as an abstract storage
+    archetypes: IndexStorage<ArchetypeIndex, Archetype>,
     // allow us to find the archetype based on what components it contains
     components_set_to_archetype: HashMap<Vec<Component>, ArchetypeIndex>,
     // where components are located, used for :
@@ -28,7 +31,7 @@ pub struct ArchetypeManager {
 }
 
 impl ArchetypeManager {
-    pub const NO_COMPONENT_ARCHETYPE: ArchetypeIndex = 0;
+    pub const NO_COMPONENT_ARCHETYPE: ArchetypeIndex = ArchetypeIndex(0);
 
     pub fn new() -> Self {
         let component_bridge = ComponentIdentityBridge::default();
@@ -36,9 +39,8 @@ impl ArchetypeManager {
             (vec![], Self::NO_COMPONENT_ARCHETYPE), // no component archetype
         ]);
 
-        let archetypes = vec![
-            Archetype::new(vec![], &component_bridge), // no component archetype
-        ];
+        let mut archetypes = IndexStorage::default();
+        archetypes.push(Archetype::new(vec![], &component_bridge));
         Self {
             archetypes,
             components_set_to_archetype,
@@ -138,15 +140,14 @@ impl ArchetypeManager {
             return *index;
         }
         let new_archetype = Archetype::new(components.clone(), &self.component_bridge);
-        let archetype_index = self.archetypes.len();
+        let archetype_index = self.archetypes.push(new_archetype);
+
         for (i, component) in components.iter().enumerate() {
             self.component_location
                 .entry(*component)
                 .or_insert(HashMap::new())
-                .insert(archetype_index, i);
+                .insert(archetype_index, ColumnIndex(i));
         }
-
-        self.archetypes.push(new_archetype);
         self.components_set_to_archetype
             .insert(components, archetype_index);
 
@@ -221,9 +222,7 @@ impl ArchetypeManager {
     /// this function can be used to build to kind of queries,
     /// - long living query, that are stored in the query manager in order to be maintained
     /// - short living query, which will only remain valid as long as archetypes doesn't change
-    pub fn create_query(&self, requested_components: Vec<Component>) -> Query {
-        println!("new query with : {:?}", requested_components);
-
+    pub fn create_query(&self, requested_components: Vec<Component>) -> QuerySet {
         let accessible_components = HashMap::from_iter(
             requested_components
                 .iter()
@@ -231,18 +230,15 @@ impl ArchetypeManager {
                 .filter(|component| self.component_bridge.is_sized_component(component))
                 .flat_map(|component| self.component_bridge.find_identity(&component))
                 .enumerate()
-                .map(|(a, b)| (b, a)),
-        );
-
-        println!(
-            "there are {:?} component accessible",
-            accessible_components.len()
+                .map(|(a, b)| (b, LocalColumnIndex(a))),
         );
 
         if requested_components.len() == 0 {
-            return Query {
+            return QuerySet {
                 requested_components,
-                archetypes: HashMap::from_iter((0..self.archetypes.len()).map(|u| (u, vec![]))),
+                archetypes: HashMap::from_iter(
+                    self.archetypes.keys().map(|i| (i, vec![])),
+                ),
                 accessible_components: Default::default(),
             };
         };
@@ -276,9 +272,7 @@ impl ArchetypeManager {
                 }),
         );
 
-        println!("new query with {} archetypes", archetypes.len());
-
-        Query {
+        QuerySet {
             requested_components,
             accessible_components,
             archetypes,

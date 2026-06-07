@@ -1,14 +1,21 @@
-use crate::{ArchetypeIndex, QueryIndex, archetype_manager::ArchetypeManager, query::Query};
-use registry_ffi::Component;
+use crate::{
+    ArchetypeIndex, QuerySetIndex,
+    archetype_manager::ArchetypeManager,
+    index_storage::IndexStorage,
+    query::{QueryMutability, QuerySet},
+};
+use registry_ffi::{Component, Query, QueryBuilder, QueryMutabilityIndex};
 use std::{cmp::Ordering, collections::HashMap};
 
 /// store and maintain Query.
-/// Queries aren't deletable
+/// Queries aren't deletable for now
 #[derive(Default)]
 pub struct QueryManager {
-    queries: Vec<Query>, //I didn't find a smarter way than iterating through all queries to find candidats in case of an archetype match
+    query_sets: IndexStorage<QuerySetIndex, QuerySet>, //I didn't find a smarter way than iterating through all queries to find candidates in case of an archetype match
     // since archetype creation should be occasional, it shouldn't be an issue
-    builder_to_queries: HashMap<Vec<Component>, QueryIndex>,
+    builder_to_query_sets: HashMap<Vec<Component>, QuerySetIndex>, //The whole point of querySet is optimizing maintenance cost (archetype addition)
+    query_mutabilities: IndexStorage<QueryMutabilityIndex, QueryMutability>,
+    builder_to_query_mutabilities: HashMap<QueryMutability, QueryMutabilityIndex>,
 }
 
 fn contain<T: Ord>(container: &[T], contained: &[T]) -> bool {
@@ -35,27 +42,50 @@ fn test_contain() {
 }
 
 impl QueryManager {
-    pub fn insert_query(
+    fn insert_query_set(
         &mut self,
         builder: Vec<Component>,
-        builder_func: impl Fn(Vec<Component>) -> Query,
-    ) -> QueryIndex {
-        if let Some(index) = self.builder_to_queries.get(&builder) {
+        queryset_builder: impl Fn(Vec<Component>) -> QuerySet,
+    ) -> QuerySetIndex {
+        if let Some(index) = self.builder_to_query_sets.get(&builder) {
             return *index;
         }
-        let index = self.queries.len();
-        let query = builder_func(builder.clone());
-        self.queries.push(query);
-        self.builder_to_queries.insert(builder, index);
+        let query_set = queryset_builder(builder.clone());
+        let index = self.query_sets.push(query_set);
+        self.builder_to_query_sets.insert(builder, index);
         index
     }
 
+    fn insert_query_mutability(&mut self, builder: QueryMutability) -> QueryMutabilityIndex {
+        if let Some(index) = self.builder_to_query_mutabilities.get(&builder) {
+            return *index;
+        }
+        let index = self.query_mutabilities.push(builder.clone());
+        self.builder_to_query_mutabilities.insert(builder, index);
+        index
+    }
+
+    pub fn get_query(
+        &mut self,
+        builder: QueryBuilder,
+        queryset_builder: impl Fn(Vec<Component>) -> QuerySet,
+    ) -> Query {
+        let requested_components = builder.requested_components.to_vec();
+        let mutabilities = builder.mutabilities.to_vec();
+
+        Query {
+            set: self.insert_query_set(requested_components, queryset_builder),
+            mutability: self.insert_query_mutability(QueryMutability { mutabilities }),
+        }
+    }
+
+    /// update all QuerySet that are concerned by the change
     pub fn add_archetype(
         &mut self,
         archetype_index: ArchetypeIndex,
         archetypes: &ArchetypeManager,
     ) {
-        for query in &mut self.queries {
+        for query in self.query_sets.values_mut() {
             if contain(
                 archetypes.get_archetype(archetype_index).get_descriptor(),
                 query.requested_components(),
@@ -65,7 +95,7 @@ impl QueryManager {
         }
     }
 
-    pub fn get(&self, id: QueryIndex) -> &Query {
-        &self.queries[id]
+    pub fn get_query_set(&self, id: QuerySetIndex) -> &QuerySet {
+        &self.query_sets[id]
     }
 }
