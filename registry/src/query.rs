@@ -1,8 +1,7 @@
 use crate::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
 use reflexion::{ffi_enum::FfiResult, ffi_slice::FfiSlice};
 use registry_ffi::{
-    Component, ComponentIdentity, ComponentMutability, LocalColumnIndex,
-    RegistryError,
+    Component, ComponentIdentity, ComponentMutability, LocalColumnIndex, RegistryError,
 };
 use std::collections::HashMap;
 

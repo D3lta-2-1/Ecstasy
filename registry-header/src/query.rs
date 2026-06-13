@@ -1,43 +1,46 @@
+use std::array;
+
 use reflexion::erased::ErasedMutPointer;
 use registry_ffi::{
     ArchetypeIndex, ColumnIndex, ComponentDescriptor, ComponentMutability, Entity, EntityLocation,
     LocalColumnIndex, QueryBuilder, RegistryError, RegistryHandle, RegistryMutHandle,
 };
-use std::array;
 
 use crate::Component;
 
-trait ComponentRef<'a> {
+pub trait ComponentRef {
     const MUTABILITY: ComponentMutability;
-    const DESCRIPTOR: ComponentDescriptor;
-    unsafe fn from_erased(ptr: ErasedMutPointer) -> Self;
+    type Inner;
+    type Ref<'a>;
+    unsafe fn from_erased<'a>(ptr: ErasedMutPointer) -> Self::Ref<'a>;
 }
 
-impl<T: Component> ComponentRef<'_> for &T {
+impl<T: 'static> ComponentRef for &T {
     const MUTABILITY: ComponentMutability = ComponentMutability::Const;
-    const DESCRIPTOR: ComponentDescriptor = T::DESCRIPTOR;
-    unsafe fn from_erased(ptr: ErasedMutPointer) -> Self {
+    type Inner = T;
+    type Ref<'a> = &'a T;
+    unsafe fn from_erased<'a>(ptr: ErasedMutPointer) -> &'a T {
         unsafe { ptr.as_erased_ref().cast() }
     }
 }
 
-impl<T: Component> ComponentRef<'_> for &mut T {
+impl<T: Component + 'static> ComponentRef for &mut T {
     const MUTABILITY: ComponentMutability = ComponentMutability::Mut;
-    const DESCRIPTOR: ComponentDescriptor = T::DESCRIPTOR;
-
-    unsafe fn from_erased(ptr: ErasedMutPointer) -> Self {
+    type Inner = T;
+    type Ref<'a> = &'a mut T;
+    unsafe fn from_erased<'a>(ptr: ErasedMutPointer) -> &'a mut T {
         unsafe { ptr.as_erased_mut().cast() }
     }
 }
 
 // this might need to be moved elsewhere
-pub trait StaticCollection<T: Copy>: AsRef<[T]> + AsMut<[T]> + Copy {
+pub trait StaticCollection<T>: AsRef<[T]> + AsMut<[T]> {
     // used to avoid to use an explicit SIZE generic...
     fn from_fn(f: impl FnMut(usize) -> T) -> Self;
     fn for_each(&mut self, f: impl FnMut(&mut T));
 }
 
-impl<T: Copy, const SIZE: usize> StaticCollection<T> for [T; SIZE] {
+impl<T, const SIZE: usize> StaticCollection<T> for [T; SIZE] {
     fn from_fn(f: impl FnMut(usize) -> T) -> Self {
         array::from_fn(f)
     }
@@ -48,19 +51,27 @@ impl<T: Copy, const SIZE: usize> StaticCollection<T> for [T; SIZE] {
 }
 
 pub trait QueryBundle {
-    type Array<T: Copy>: StaticCollection<T>;
+    type BundleRef<'a>;
+    type Array<T: 'static>: StaticCollection<T>;
     const DESCRIPTORS: Self::Array<ComponentDescriptor>; //descriptor of the value, not the refs
     const MUTABILTY: Self::Array<ComponentMutability>;
-    unsafe fn build(pointers: Self::Array<ErasedMutPointer>) -> Self;
+    unsafe fn build<'a>(pointers: Self::Array<ErasedMutPointer>) -> Self::BundleRef<'a>;
 }
 
-impl<'a, T: ComponentRef<'a>, U: ComponentRef<'a>> QueryBundle for (T, U) {
-    type Array<V: Copy> = [V; 2];
-    const DESCRIPTORS: [ComponentDescriptor; 2] = [T::DESCRIPTOR, U::DESCRIPTOR];
+impl<T, U> QueryBundle for (T, U)
+where
+    T: ComponentRef,
+    T::Inner: Component,
+    U: ComponentRef,
+    U::Inner: Component,
+{
+    type BundleRef<'a> = (T::Ref<'a>, U::Ref<'a>);
+    type Array<V: 'static> = [V; 2];
+    const DESCRIPTORS: [ComponentDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
     const MUTABILTY: [ComponentMutability; 2] = [T::MUTABILITY, U::MUTABILITY];
 
-    unsafe fn build([u, v]: [ErasedMutPointer; 2]) -> Self {
-        unsafe { (T::from_erased(u), U::from_erased(v)) }
+    unsafe fn build<'a>([u, v]: [ErasedMutPointer; 2]) -> Self::BundleRef<'a> {
+        unsafe { (T::from_erased::<'a>(u), U::from_erased::<'a>(v)) }
     }
 }
 
@@ -88,19 +99,18 @@ fn test_sort() {
     assert_eq!(values, [5, 4, 3, 2, 1]);
 }
 
-#[derive(Clone, Copy)]
-pub struct QueryHeaderData<QUERY: QueryBundle> {
+pub struct QueryState<Bundle: QueryBundle> {
     pub id: registry_ffi::Query,
-    local_to_column_index: QUERY::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields, meaning that local_to_column_index[0] give the local column index of the first component
+    local_to_column_index: Bundle::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields, meaning that local_to_column_index[0] give the local column index of the first component
 }
 
 // TODO: add iterator on Queries,
-impl<QUERY: QueryBundle> QueryHeaderData<QUERY> {
+impl<Bundle: QueryBundle> QueryState<Bundle> {
     pub fn new(registry: &mut RegistryMutHandle) -> Self {
-        let mut requested_components = <QUERY::Array<Entity>>::from_fn(|i| {
-            registry.find_or_register_component(&QUERY::DESCRIPTORS.as_ref()[i])
+        let mut requested_components = <Bundle::Array<Entity>>::from_fn(|i| {
+            registry.find_or_register_component(&Bundle::DESCRIPTORS.as_ref()[i])
         });
-        let mut mutabilities = QUERY::MUTABILTY;
+        let mut mutabilities = Bundle::MUTABILTY;
         sort(requested_components.as_mut(), mutabilities.as_mut());
 
         let builder = QueryBuilder {
@@ -109,9 +119,9 @@ impl<QUERY: QueryBundle> QueryHeaderData<QUERY> {
         };
 
         let id = registry.get_query_id(builder);
-        let columns = <QUERY::Array<LocalColumnIndex>>::from_fn(|i| {
+        let columns = <Bundle::Array<LocalColumnIndex>>::from_fn(|i| {
             let query = registry.get_query(id.set);
-            query.get_local_column_index(&QUERY::DESCRIPTORS.as_ref()[i].identity)
+            query.get_local_column_index(&Bundle::DESCRIPTORS.as_ref()[i].identity)
         });
         Self {
             id,
@@ -124,23 +134,27 @@ impl<QUERY: QueryBundle> QueryHeaderData<QUERY> {
         &self,
         registry: RegistryHandle,
         archetype_index: ArchetypeIndex,
-    ) -> Result<QUERY::Array<ColumnIndex>, RegistryError> {
+    ) -> Result<Bundle::Array<ColumnIndex>, RegistryError> {
         let query = registry.get_query(self.id.set);
         let columns = query
             .columns_index_for_archetype(archetype_index)
             .as_result()?;
-        Ok(<QUERY::Array<ColumnIndex>>::from_fn(|i| {
+        Ok(<Bundle::Array<ColumnIndex>>::from_fn(|i| {
             columns[self.local_to_column_index.as_ref()[i].0]
         }))
     }
 
-    pub fn get(&self, registry: RegistryHandle, entity: Entity) -> Result<QUERY, RegistryError> {
+    pub fn get<'a>(
+        &'a self,
+        registry: RegistryHandle,
+        entity: Entity,
+    ) -> Result<Bundle::BundleRef<'a>, RegistryError> {
         let EntityLocation {
             archetype_index,
             entity_index,
         } = registry.location(entity).as_result()?;
         let columns = self.get_columns_in_archetype(registry, archetype_index)?;
-        let mut starts = <QUERY::Array<ErasedMutPointer>>::from_fn(|_| ErasedMutPointer::empty());
+        let mut starts = <Bundle::Array<ErasedMutPointer>>::from_fn(|_| ErasedMutPointer::empty());
         unsafe {
             registry.get_column_begin(
                 archetype_index,
@@ -148,11 +162,14 @@ impl<QUERY: QueryBundle> QueryHeaderData<QUERY> {
                 starts.as_mut().into(),
             );
             starts.for_each(|p| *p = p.offset(entity_index.0));
-            Ok(QUERY::build(starts))
+            Ok(Bundle::build(starts))
         }
     }
 
-    pub fn promote<'a>(&'a self, handle: RegistryHandle<'a>) -> Query<'a, QUERY> {
+    pub fn promote<'registry, 'state>(
+        &'state self,
+        handle: RegistryHandle<'registry>,
+    ) -> Query<'registry, 'state, Bundle> {
         Query {
             inner: &self,
             handle,
@@ -160,13 +177,13 @@ impl<QUERY: QueryBundle> QueryHeaderData<QUERY> {
     }
 }
 
-pub struct Query<'a, QUERY: QueryBundle> {
-    inner: &'a QueryHeaderData<QUERY>,
-    handle: RegistryHandle<'a>,
+pub struct Query<'registry, 'state, Bundle: QueryBundle> {
+    inner: &'state QueryState<Bundle>,
+    handle: RegistryHandle<'registry>,
 }
 
-impl<'a, QUERY: QueryBundle> Query<'a, QUERY> {
-    pub fn get(&self, entity: Entity) -> Result<QUERY, RegistryError> {
+impl<'registry, 'state, Bundle: QueryBundle> Query<'registry, 'state, Bundle> {
+    pub fn get(&self, entity: Entity) -> Result<Bundle::BundleRef<'_>, RegistryError> {
         self.inner.get(self.handle, entity)
     }
 }

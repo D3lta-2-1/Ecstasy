@@ -236,9 +236,7 @@ impl ArchetypeManager {
         if requested_components.len() == 0 {
             return QuerySet {
                 requested_components,
-                archetypes: HashMap::from_iter(
-                    self.archetypes.keys().map(|i| (i, vec![])),
-                ),
+                archetypes: HashMap::from_iter(self.archetypes.keys().map(|i| (i, vec![]))),
                 accessible_components: Default::default(),
             };
         };
