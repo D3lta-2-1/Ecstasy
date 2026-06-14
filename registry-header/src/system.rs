@@ -17,9 +17,13 @@ where
     type System = FunctionSystem<F, Params>;
 
     fn into_system(self, handle: &mut RegistryMutHandle) -> Self::System {
+        let mut used_queries = Vec::new();
+        let state = F::Params::init_state(handle);
+        F::Params::build_query_list(&state, &mut used_queries);
         FunctionSystem {
             system: self,
-            cache: F::Params::init_state(handle),
+            state,
+            used_queries,
         }
     }
 }
@@ -27,10 +31,11 @@ where
 /// Function with only system params
 pub trait SystemParamFunction<Marker>: 'static {
     type Params: SystemParam;
-    fn run(&mut self, parmas: SystemParamItem<Self::Params>);
+    fn run(&mut self, params: SystemParamItem<Self::Params>);
 }
 
 /// one param function
+// TODO: ADD macro for tuple up to 16
 impl<Func, P1: SystemParam> SystemParamFunction<(P1,)> for Func
 where
     Func: Send + Sync + 'static,
@@ -38,23 +43,15 @@ where
 {
     type Params = (P1,);
 
-    fn run(&mut self, param: SystemParamItem<Self::Params>) {
-        let (p1,) = param;
+    fn run(&mut self, params: SystemParamItem<Self::Params>) {
+        let (p1,) = params;
+        #[inline(always)]
         fn call_inner<P1>(mut f: impl FnMut(P1), p1: P1) {
             f(p1)
         }
         call_inner(self, p1);
     }
 }
-
-/*impl<F, P1: SystemParam, P2: SystemParam> SystemParamFunction<(P1, P2)> for F
-where
-    F: FnMut(P1, P2) -> () + 'static,
-{
-    fn run(&mut self, (parms1, parms2): (P1, P2)) {
-        self(parms1, parms2)
-    }
-}*/
 
 /// implemented by all objects that can be used as a parameter.
 pub trait SystemParam {
@@ -65,6 +62,8 @@ pub trait SystemParam {
         state: &'state Self::State,
         handle: RegistryHandle<'registry>,
     ) -> Self::Item<'registry, 'state>;
+
+    fn build_query_list(state: &Self::State, list: &mut Vec<registry_ffi::Query>);
 }
 
 pub type SystemParamItem<'r, 's, P> = <P as SystemParam>::Item<'r, 's>;
@@ -82,6 +81,10 @@ impl<Bundle: QueryBundle + 'static> SystemParam for Query<'_, '_, Bundle> {
         handle: RegistryHandle<'registry>,
     ) -> Self::Item<'registry, 'state> {
         state.promote(handle)
+    }
+
+    fn build_query_list(state: &Self::State, list: &mut Vec<registry_ffi::Query>) {
+        list.push(state.id);
     }
 }
 
@@ -101,6 +104,10 @@ where
         handle: RegistryHandle<'r>,
     ) -> Self::Item<'r, 's> {
         (T1::get_param(state0, handle),)
+    }
+
+    fn build_query_list((state0,): &Self::State, list: &mut Vec<registry_ffi::Query>) {
+        T1::build_query_list(state0, list);
     }
 }
 
@@ -122,23 +129,29 @@ where
     ) -> Self::Item<'r, 's> {
         (T1::get_param(state0, handle), T2::get_param(state1, handle))
     }
+
+    fn build_query_list((state0, state1): &Self::State, list: &mut Vec<registry_ffi::Query>) {
+        T1::build_query_list(state0, list);
+        T2::build_query_list(state1, list);
+    }
 }
 
 /// Represent a system with its params
 pub struct FunctionSystem<F: SystemParamFunction<Params> + 'static, Params: SystemParam> {
     system: F,
-    cache: <F::Params as SystemParam>::State,
+    state: <F::Params as SystemParam>::State,
+    used_queries: Vec<registry_ffi::Query>,
 }
 
 impl<F: SystemParamFunction<Params> + 'static, Params: SystemParam> System
     for FunctionSystem<F, Params>
 {
     extern "C" fn call(&mut self, handle: RegistryHandle) {
-        let arg = F::Params::get_param(&self.cache, handle);
+        let arg = F::Params::get_param(&self.state, handle);
         self.system.run(arg)
     }
 
     extern "C" fn query_list(&self) -> FfiSlice<&registry_ffi::Query> {
-        todo!()
+        self.used_queries.as_slice().into()
     }
 }

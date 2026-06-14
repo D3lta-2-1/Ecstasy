@@ -1,6 +1,7 @@
 pub mod bundle;
 pub mod query;
 pub mod system;
+pub mod array_utils;
 
 pub use crate::bundle::{Component, StaticBundle};
 use reflexion::ffi_collection::FfiCollectionIter;

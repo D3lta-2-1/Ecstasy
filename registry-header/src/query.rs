@@ -1,12 +1,13 @@
-use std::array;
-
 use reflexion::erased::ErasedMutPointer;
 use registry_ffi::{
     ArchetypeIndex, ColumnIndex, ComponentDescriptor, ComponentMutability, Entity, EntityLocation,
     LocalColumnIndex, QueryBuilder, RegistryError, RegistryHandle, RegistryMutHandle,
 };
 
-use crate::Component;
+use crate::{
+    Component,
+    array_utils::{Array, sort},
+};
 
 pub trait ComponentRef {
     const MUTABILITY: ComponentMutability;
@@ -33,26 +34,9 @@ impl<T: Component + 'static> ComponentRef for &mut T {
     }
 }
 
-// this might need to be moved elsewhere
-pub trait StaticCollection<T>: AsRef<[T]> + AsMut<[T]> {
-    // used to avoid to use an explicit SIZE generic...
-    fn from_fn(f: impl FnMut(usize) -> T) -> Self;
-    fn for_each(&mut self, f: impl FnMut(&mut T));
-}
-
-impl<T, const SIZE: usize> StaticCollection<T> for [T; SIZE] {
-    fn from_fn(f: impl FnMut(usize) -> T) -> Self {
-        array::from_fn(f)
-    }
-
-    fn for_each(&mut self, f: impl FnMut(&mut T)) {
-        self.iter_mut().for_each(f)
-    }
-}
-
 pub trait QueryBundle {
     type BundleRef<'a>;
-    type Array<T: 'static>: StaticCollection<T>;
+    type Array<T: 'static>: Array<T>;
     const DESCRIPTORS: Self::Array<ComponentDescriptor>; //descriptor of the value, not the refs
     const MUTABILTY: Self::Array<ComponentMutability>;
     unsafe fn build<'a>(pointers: Self::Array<ErasedMutPointer>) -> Self::BundleRef<'a>;
@@ -75,30 +59,6 @@ where
     }
 }
 
-/// sort on array, and applies the same perumtation to the other one
-pub fn sort<T: Ord, U>(keys: &mut [T], values: &mut [U]) {
-    assert_eq!(keys.len(), values.len());
-    for i in 1..keys.len() {
-        for j in (0..i).rev() {
-            if keys[j + 1] < keys[j] {
-                keys.swap(j + 1, j);
-                values.swap(j + 1, j);
-            } else {
-                break;
-            }
-        }
-    }
-}
-
-#[test]
-fn test_sort() {
-    let mut keys = [5, 4, 3, 2, 1];
-    let mut values = [1, 2, 3, 4, 5];
-    sort(&mut keys, &mut values);
-    assert_eq!(keys, [1, 2, 3, 4, 5]);
-    assert_eq!(values, [5, 4, 3, 2, 1]);
-}
-
 pub struct QueryState<Bundle: QueryBundle> {
     pub id: registry_ffi::Query,
     local_to_column_index: Bundle::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields, meaning that local_to_column_index[0] give the local column index of the first component
@@ -107,9 +67,8 @@ pub struct QueryState<Bundle: QueryBundle> {
 // TODO: add iterator on Queries,
 impl<Bundle: QueryBundle> QueryState<Bundle> {
     pub fn new(registry: &mut RegistryMutHandle) -> Self {
-        let mut requested_components = <Bundle::Array<Entity>>::from_fn(|i| {
-            registry.find_or_register_component(&Bundle::DESCRIPTORS.as_ref()[i])
-        });
+        let mut requested_components: Bundle::Array<Entity> =
+            Bundle::DESCRIPTORS.map(|descriptor| registry.find_or_register_component(&descriptor));
         let mut mutabilities = Bundle::MUTABILTY;
         sort(requested_components.as_mut(), mutabilities.as_mut());
 
@@ -119,10 +78,9 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
         };
 
         let id = registry.get_query_id(builder);
-        let columns = <Bundle::Array<LocalColumnIndex>>::from_fn(|i| {
-            let query = registry.get_query(id.set);
-            query.get_local_column_index(&Bundle::DESCRIPTORS.as_ref()[i].identity)
-        });
+        let query = registry.get_query(id.set);
+        let columns = Bundle::DESCRIPTORS
+            .map(|descriptor| query.get_local_column_index(&descriptor.identity));
         Self {
             id,
             local_to_column_index: columns,
