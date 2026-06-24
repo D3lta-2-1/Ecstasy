@@ -1,12 +1,12 @@
-use reflexion::erased::ErasedMutPointer;
-use registry_ffi::{
-    ArchetypeIndex, ColumnIndex, ComponentDescriptor, ComponentMutability, Entity, EntityLocation,
-    LocalColumnIndex, QueryBuilder, RegistryError, RegistryHandle, RegistryMutHandle,
+use crate::bundle::Component;
+use ecstasy_ffi::{
+    ArchetypeIndex, ColumnIndex, ComponentMutability, Entity, EntityLocation, LocalColumnIndex, QueryBuilder, QuerySetIndex, RegistryError, RegistryOpaque, TypeDescriptor
 };
+use reflexion::erased::ErasedMutPointer;
 
 use crate::{
-    Component,
     array_utils::{Array, sort},
+    loader::{QuerySetLoader, RegistryLoader},
 };
 
 pub trait ComponentRef {
@@ -37,10 +37,12 @@ impl<T: Component + 'static> ComponentRef for &mut T {
 pub trait QueryBundle {
     type BundleRef<'a>;
     type Array<T: 'static>: Array<T>;
-    const DESCRIPTORS: Self::Array<ComponentDescriptor>; //descriptor of the value, not the refs
+    const DESCRIPTORS: Self::Array<TypeDescriptor>; //descriptor of the value, not the refs
     const MUTABILTY: Self::Array<ComponentMutability>;
     unsafe fn build<'a>(pointers: Self::Array<ErasedMutPointer>) -> Self::BundleRef<'a>;
 }
+
+// TODO: implement Bundle for any size
 
 impl<T, U> QueryBundle for (T, U)
 where
@@ -51,7 +53,7 @@ where
 {
     type BundleRef<'a> = (T::Ref<'a>, U::Ref<'a>);
     type Array<V: 'static> = [V; 2];
-    const DESCRIPTORS: [ComponentDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
+    const DESCRIPTORS: [TypeDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
     const MUTABILTY: [ComponentMutability; 2] = [T::MUTABILITY, U::MUTABILITY];
 
     unsafe fn build<'a>([u, v]: [ErasedMutPointer; 2]) -> Self::BundleRef<'a> {
@@ -60,27 +62,26 @@ where
 }
 
 pub struct QueryState<Bundle: QueryBundle> {
-    pub id: registry_ffi::Query,
+    pub id: QuerySetIndex,
     local_to_column_index: Bundle::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields, meaning that local_to_column_index[0] give the local column index of the first component
 }
 
 // TODO: add iterator on Queries,
 impl<Bundle: QueryBundle> QueryState<Bundle> {
-    pub fn new(registry: &mut RegistryMutHandle) -> Self {
-        let mut requested_components: Bundle::Array<Entity> =
-            Bundle::DESCRIPTORS.map(|descriptor| registry.find_or_register_component(&descriptor));
+    pub fn new(registry: &mut RegistryOpaque) -> Self {
+        let mut requested_components: Bundle::Array<Entity> = Bundle::DESCRIPTORS
+            .map(|descriptor| RegistryLoader::find_or_register_component(registry, &descriptor));
         let mut mutabilities = Bundle::MUTABILTY;
         sort(requested_components.as_mut(), mutabilities.as_mut());
 
         let builder = QueryBuilder {
             requested_components: requested_components.as_ref().into(),
-            mutabilities: mutabilities.as_ref().into(),
         };
 
-        let id = registry.get_query_id(builder);
-        let query = registry.get_query(id.set);
+        let id = RegistryLoader::get_query_id(registry, builder);
+        let query = RegistryLoader::get_query(registry, id);
         let columns = Bundle::DESCRIPTORS
-            .map(|descriptor| query.get_local_column_index(&descriptor.identity));
+            .map(|descriptor| QuerySetLoader::get_local_column_index(query, &descriptor.identity));
         Self {
             id,
             local_to_column_index: columns,
@@ -90,13 +91,11 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
     /// return the corresponding column, properly ordered for reading, return none if the archetype isn't part of the query
     fn get_columns_in_archetype(
         &self,
-        registry: RegistryHandle,
+        registry: &RegistryOpaque,
         archetype_index: ArchetypeIndex,
     ) -> Result<Bundle::Array<ColumnIndex>, RegistryError> {
-        let query = registry.get_query(self.id.set);
-        let columns = query
-            .columns_index_for_archetype(archetype_index)
-            .as_result()?;
+        let query = RegistryLoader::get_query(registry, self.id);
+        let columns = QuerySetLoader::columns_index_for_archetype(query, archetype_index)?;
         Ok(<Bundle::Array<ColumnIndex>>::from_fn(|i| {
             columns[self.local_to_column_index.as_ref()[i].0]
         }))
@@ -104,20 +103,21 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
 
     pub fn get<'a>(
         &'a self,
-        registry: RegistryHandle,
+        registry: &RegistryOpaque,
         entity: Entity,
     ) -> Result<Bundle::BundleRef<'a>, RegistryError> {
         let EntityLocation {
             archetype_index,
             entity_index,
-        } = registry.location(entity).as_result()?;
+        } = RegistryLoader::location(registry, entity)?;
         let columns = self.get_columns_in_archetype(registry, archetype_index)?;
         let mut starts = <Bundle::Array<ErasedMutPointer>>::from_fn(|_| ErasedMutPointer::empty());
         unsafe {
-            registry.get_column_begin(
+            RegistryLoader::get_column_begin(
+                registry,
                 archetype_index,
-                columns.as_ref().into(),
-                starts.as_mut().into(),
+                columns.as_ref(),
+                starts.as_mut(),
             );
             starts.for_each(|p| *p = p.offset(entity_index.0));
             Ok(Bundle::build(starts))
@@ -126,7 +126,7 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
 
     pub fn promote<'registry, 'state>(
         &'state self,
-        handle: RegistryHandle<'registry>,
+        handle: &'registry RegistryOpaque,
     ) -> Query<'registry, 'state, Bundle> {
         Query {
             inner: &self,
@@ -137,7 +137,7 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
 
 pub struct Query<'registry, 'state, Bundle: QueryBundle> {
     inner: &'state QueryState<Bundle>,
-    handle: RegistryHandle<'registry>,
+    handle: &'registry RegistryOpaque,
 }
 
 impl<'registry, 'state, Bundle: QueryBundle> Query<'registry, 'state, Bundle> {

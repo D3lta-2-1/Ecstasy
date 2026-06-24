@@ -6,7 +6,18 @@ use crate::{
     drop_location::DropLocation,
     typeinfo::{TypeInfo, TypeInfoProvider},
 };
-use std::{marker::PhantomData, mem, ptr::NonNull};
+use std::{fmt::Debug, marker::PhantomData, mem, ptr::NonNull};
+
+/// a Trait used to define
+pub unsafe trait ZeroSized {}
+
+#[repr(C)]
+pub struct Any {
+    _data: (),
+    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
+}
+
+unsafe impl ZeroSized for Any {}
 
 /// A pointer encapsulation without any type information.
 /// This is used to store pointers to any type in a generic way.
@@ -16,13 +27,34 @@ use std::{marker::PhantomData, mem, ptr::NonNull};
 /// or not, therefor, it doesn't perform any kind of ownership
 /// It is equivalent of a NonNull ptr type.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct ErasedMutPointer {
+pub struct ErasedMutPointer<PTR: ZeroSized = Any> {
     pub data: NonNull<u8>,
     pub type_info: TypeInfo,
+    phantom: PhantomData<PTR>,
 }
 
-impl ErasedMutPointer {
+impl<PTR: ZeroSized> Clone for ErasedMutPointer<PTR> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            type_info: self.type_info.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<PTR: ZeroSized> Copy for ErasedMutPointer<PTR> {}
+
+impl<PTR: ZeroSized> Debug for ErasedMutPointer<PTR> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ErasedMutPointer")
+            .field("data", &self.data)
+            .field("type_info", &self.type_info)
+            .finish()
+    }
+}
+
+impl<PTR: ZeroSized> ErasedMutPointer<PTR> {
     /// return a pointer set to null, without any type associated
     /// any operation on the pointer will fail
     pub fn empty() -> Self {
@@ -33,6 +65,7 @@ impl ErasedMutPointer {
         Self {
             type_info,
             data: NonNull::dangling(),
+            phantom: PhantomData,
         }
     }
 
@@ -41,6 +74,7 @@ impl ErasedMutPointer {
             Self {
                 type_info: T::TYPE_INFO,
                 data: NonNull::new_unchecked(data as *mut T as *mut u8),
+                phantom: PhantomData,
             }
         }
     }
@@ -129,11 +163,28 @@ impl ErasedMutPointer {
             ErasedMutPointer {
                 type_info: self.type_info,
                 data: self.data.offset((offset * type_info.layout.size) as isize),
+                phantom: PhantomData,
             }
         }
     }
 
-    pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer) {
+    /// perform a ref cast but only for zero sized type
+    pub unsafe fn as_zeros_sized_ref<'a>(self) -> &'a PTR {
+        unsafe {
+            let ptr = self.data.as_ptr() as *const PTR;
+            &*ptr
+        }
+    }
+
+    /// perform a mutable ref cast but only for zero sized type
+    pub unsafe fn as_zeros_sized_mut<'a>(self) -> &'a mut PTR {
+        unsafe {
+            let ptr = self.data.as_ptr() as *mut PTR;
+            &mut *ptr
+        }
+    }
+
+    pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer<PTR>) {
         let Some(type_info) = self.type_info else {
             panic!("type info doesn't exist")
         };
@@ -160,11 +211,11 @@ impl ErasedMutPointer {
         }
     }
 
-    pub unsafe fn read<T>(self) -> T {
+    pub unsafe fn read<T: Sized>(self) -> T {
         unsafe { (self.data.as_ptr() as *const T).read() }
     }
 
-    pub unsafe fn write<T>(self, src: T) {
+    pub unsafe fn write<T: Sized>(self, src: T) {
         unsafe {
             assert_eq!(
                 self.type_info,
@@ -177,13 +228,13 @@ impl ErasedMutPointer {
         }
     }
 
-    pub unsafe fn write_drop_location(self, location: DropLocation) {
+    pub unsafe fn write_drop_location(self, location: DropLocation<PTR>) {
         unsafe { self.copy_nonoverlapping_from(location.location) }
         mem::forget(location);
     }
 
     /// build a reference, the lifetime should be provided by the caller
-    pub unsafe fn as_erased_ref<'a>(self) -> ErasedRef<'a> {
+    pub unsafe fn as_erased_ref<'a>(self) -> ErasedRef<'a, PTR> {
         ErasedRef {
             ptr: self,
             _phantom: PhantomData,
@@ -191,7 +242,7 @@ impl ErasedMutPointer {
     }
 
     /// build a reference, the lifetime should be provided by the caller
-    pub unsafe fn as_erased_mut<'a>(self) -> ErasedMut<'a> {
+    pub unsafe fn as_erased_mut<'a>(self) -> ErasedMut<'a, PTR> {
         ErasedMut {
             ptr: self,
             _phantom: PhantomData,
@@ -201,13 +252,23 @@ impl ErasedMutPointer {
 
 /// a reference for ErasedDataType
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
-pub struct ErasedRef<'a> {
-    ptr: ErasedMutPointer,
+pub struct ErasedRef<'a, PTR: ZeroSized = Any> {
+    ptr: ErasedMutPointer<PTR>,
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a> ErasedRef<'a> {
+impl<'a, PTR: ZeroSized> Clone for ErasedRef<'a, PTR> {
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr.clone(),
+            _phantom: self._phantom.clone(),
+        }
+    }
+}
+
+impl<'a, PTR: ZeroSized> Copy for ErasedRef<'a, PTR> {}
+
+impl<'a, PTR: ZeroSized> ErasedRef<'a, PTR> {
     /// Safety : this function will compare the layouts of the objects and panic if they don't match
     /// It's up to the user to cast back to the right type
     /// However, this abstraction assume that the pointed value is in a valid state.
@@ -225,14 +286,13 @@ impl<'a> ErasedRef<'a> {
 
 /// a mutable reference for ErasedDataType
 #[repr(transparent)]
-#[derive(Debug)]
-pub struct ErasedMut<'a> {
-    ptr: ErasedMutPointer,
+pub struct ErasedMut<'a, PTR: ZeroSized = Any> {
+    ptr: ErasedMutPointer<PTR>,
     _phantom: PhantomData<&'a mut ()>,
 }
 
-impl<'a> From<ErasedMut<'a>> for ErasedRef<'a> {
-    fn from(value: ErasedMut) -> Self {
+impl<'a, PTR: ZeroSized> From<ErasedMut<'a, PTR>> for ErasedRef<'a, PTR> {
+    fn from(value: ErasedMut<PTR>) -> Self {
         ErasedRef {
             ptr: value.ptr,
             _phantom: PhantomData,
@@ -240,7 +300,7 @@ impl<'a> From<ErasedMut<'a>> for ErasedRef<'a> {
     }
 }
 
-impl<'a> ErasedMut<'a> {
+impl<'a, PTR: ZeroSized> ErasedMut<'a, PTR> {
     /// Safety, this function will compare the layouts of the objects and panic if they don't match
     /// It's up to the user to cast back to the right type
     /// However, this abstraction assume that the pointed value is in a valid state.
@@ -256,7 +316,7 @@ impl<'a> ErasedMut<'a> {
     }
 
     /// replace the contained value with
-    pub fn write(&mut self, drop_location: DropLocation) {
+    pub fn write(&mut self, drop_location: DropLocation<PTR>) {
         unsafe {
             self.ptr.drop_in_place();
             self.ptr.write_drop_location(drop_location);

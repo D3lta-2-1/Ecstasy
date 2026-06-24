@@ -1,9 +1,15 @@
-use registry::Registry;
-use registry_ffi::{RegistryVtableExt, System};
-use registry_header::{
-    Component, RegistryHeader,
-    query::{Query, QueryState},
-    system::IntoSystem,
+use ecstasy::{
+    Component, Query, RegistryHeader,
+    loader::{Ecstasy, EcstasyContext},
+    query::QueryState,
+};
+use ecstasy_ffi::{
+    QuerySetVtableExt, RegistryVtableExt, SchedulerBuilderVtableExt, SystemContextVtableExt,
+};
+
+use ecstasy_core::{
+    registry::{Registry, query::QuerySet},
+    scheduler::{Scheduler, SchedulerBuilder},
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -28,10 +34,19 @@ impl Component for Vel {
     const NAME: &'static str = "vel";
 }
 
+const CONTEXT: EcstasyContext = EcstasyContext {
+    registry: &Registry::VTABLE,
+    query_set: &QuerySet::VTABLE,
+    scheduler_builder: &SchedulerBuilder::VTABLE,
+    system_context: &Scheduler::VTABLE,
+};
+
 #[test]
 fn creation() {
+    let _ = Ecstasy::load(CONTEXT);
+
     let mut registry_impl = Registry::new();
-    let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
+    let mut registry = RegistryHeader::new(registry_impl.as_opaque_mut());
     let e1 = registry.new_entity((Pos { x: 0.0, y: 0.0 }, Vel { x: 1.0, y: 1.0 }));
     let e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
 
@@ -46,8 +61,10 @@ fn creation() {
 
 #[test]
 fn addition_no_overwrite() {
+    let _ = Ecstasy::load(CONTEXT);
+
     let mut registry_impl = Registry::new();
-    let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
+    let mut registry = RegistryHeader::new(registry_impl.as_opaque_mut());
     let e = registry.new_entity(Pos { x: 3.0, y: 6.0 });
     registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
@@ -59,8 +76,10 @@ fn addition_no_overwrite() {
 
 #[test]
 fn addition_with_overwrite() {
+    let _ = Ecstasy::load(CONTEXT);
+
     let mut registry_impl = Registry::new();
-    let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
+    let mut registry = RegistryHeader::new(registry_impl.as_opaque_mut());
     let e = registry.new_entity((Pos { x: 3.0, y: 6.0 }, Vel { x: 0.0, y: 0.0 }));
     registry.add(e, Vel { x: 1.0, y: 1.0 }).unwrap();
 
@@ -72,24 +91,28 @@ fn addition_with_overwrite() {
 
 #[test]
 fn query() {
+    let _ = Ecstasy::load(CONTEXT);
+
     let mut registry_impl = Registry::new();
-    let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
+    let mut registry = RegistryHeader::new(registry_impl.as_opaque_mut());
     let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
     let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
-
-    let query = QueryState::<(&Pos, &Vel)>::new(registry.mut_handle());
-    let handle = registry.mut_handle();
-    let (pos, vel) = query.get(handle.as_const(), e1).unwrap();
+    let query = QueryState::<(&Pos, &Vel)>::new(registry.registry());
+    let (pos, vel) = query.get(registry.registry(), e1).unwrap();
     assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
     assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
 }
 
 #[test]
 fn test_system() {
-    let mut registry_impl = Registry::new();
-    let mut registry = RegistryHeader::new(registry_impl.as_mut_handle());
+    let _ = Ecstasy::load(CONTEXT);
+    let mut builder_impl = ecstasy_core::scheduler::SchedulerBuilder::new();
+    let mut builder = ecstasy::SchedulerBuilder::new(builder_impl.as_opaque_mut());
+
+    let mut registry = builder.registry();
     let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
     let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
+    let _ = registry;
 
     let system = move |query: Query<(&Pos, &Vel)>| {
         let (pos, vel) = query.get(e1).unwrap();
@@ -97,7 +120,5 @@ fn test_system() {
         assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
     };
 
-    let mut handle = registry_impl.as_mut_handle();
-    let mut system = system.into_system(&mut handle);
-    system.call(handle.as_const());
+    builder.add_systeme(system);
 }

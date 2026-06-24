@@ -1,12 +1,18 @@
-use crate::query::{Query, QueryBundle, QueryState};
+use crate::{
+    event::{Event, Publisher},
+    loader::{SchedulerBuilderLoader, SystemContextLoader},
+    query::{Query, QueryBundle, QueryState},
+};
+use ecstasy_ffi::{
+    self, EventIndex, QuerySetIndex, SchedulerBuilderOpaque, System, SystemContextOpaque,
+};
 use reflexion::ffi_slice::FfiSlice;
-use registry_ffi::{RegistryHandle, RegistryMutHandle, System};
 
 /// Convert thing to system (to create a trait object)
 pub trait IntoSystem<Params> {
     type System: System;
 
-    fn into_system(self, handle: &mut RegistryMutHandle) -> Self::System;
+    fn into_system(self, builder: &mut SchedulerBuilderOpaque) -> Self::System;
 }
 
 /// Convert any function with only system params into a system
@@ -16,9 +22,9 @@ where
 {
     type System = FunctionSystem<F, Params>;
 
-    fn into_system(self, handle: &mut RegistryMutHandle) -> Self::System {
+    fn into_system(self, builder: &mut SchedulerBuilderOpaque) -> Self::System {
         let mut used_queries = Vec::new();
-        let state = F::Params::init_state(handle);
+        let state = F::Params::init_state(builder);
         F::Params::build_query_list(&state, &mut used_queries);
         FunctionSystem {
             system: self,
@@ -56,35 +62,53 @@ where
 /// implemented by all objects that can be used as a parameter.
 pub trait SystemParam {
     type State;
-    type Item<'registry, 'state>: SystemParam<State = Self::State>;
-    fn init_state(handle: &mut RegistryMutHandle) -> Self::State;
-    fn get_param<'registry, 'state>(
+    type Item<'scheduler, 'state>: SystemParam<State = Self::State>;
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State;
+    fn get_param<'scheduler, 'state>(
         state: &'state Self::State,
-        handle: RegistryHandle<'registry>,
-    ) -> Self::Item<'registry, 'state>;
+        ctx: &'scheduler SystemContextOpaque,
+    ) -> Self::Item<'scheduler, 'state>;
 
-    fn build_query_list(state: &Self::State, list: &mut Vec<registry_ffi::Query>);
+    fn build_query_list(_state: &Self::State, _list: &mut Vec<QuerySetIndex>) {}
 }
 
 pub type SystemParamItem<'r, 's, P> = <P as SystemParam>::Item<'r, 's>;
 
 impl<Bundle: QueryBundle + 'static> SystemParam for Query<'_, '_, Bundle> {
     type State = QueryState<Bundle>;
-    type Item<'registry, 'state> = Query<'registry, 'state, Bundle>;
+    type Item<'scheduler, 'state> = Query<'scheduler, 'state, Bundle>;
 
-    fn init_state(handle: &mut RegistryMutHandle) -> Self::State {
-        QueryState::new(handle)
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
+        QueryState::new(SchedulerBuilderLoader::registry(builder))
     }
 
-    fn get_param<'registry, 'state>(
+    fn get_param<'scheduler, 'state>(
         state: &'state Self::State,
-        handle: RegistryHandle<'registry>,
-    ) -> Self::Item<'registry, 'state> {
-        state.promote(handle)
+        ctx: &'scheduler SystemContextOpaque,
+    ) -> Self::Item<'scheduler, 'state> {
+        let registry = SystemContextLoader::registry(ctx);
+        state.promote(registry)
     }
 
-    fn build_query_list(state: &Self::State, list: &mut Vec<registry_ffi::Query>) {
+    fn build_query_list(state: &Self::State, list: &mut Vec<QuerySetIndex>) {
         list.push(state.id);
+    }
+}
+
+impl<T: Event> SystemParam for Publisher<'_, T> {
+    type State = EventIndex;
+
+    type Item<'scheduler, 'state> = Publisher<'scheduler, T>;
+
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
+        SchedulerBuilderLoader::find_event(builder, T::DESCRIPTOR)
+    }
+
+    fn get_param<'scheduler, 'state>(
+        _state: &'state Self::State,
+        _ctx: &'scheduler SystemContextOpaque,
+    ) -> Self::Item<'scheduler, 'state> {
+        todo!()
     }
 }
 
@@ -95,18 +119,18 @@ where
     type State = (T1::State,);
     type Item<'r, 's> = (T1::Item<'r, 's>,);
 
-    fn init_state(handle: &mut RegistryMutHandle) -> Self::State {
-        (T1::init_state(handle),)
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
+        (T1::init_state(builder),)
     }
 
     fn get_param<'r, 's>(
         (state0,): &'s Self::State,
-        handle: RegistryHandle<'r>,
+        handle: &'r SystemContextOpaque,
     ) -> Self::Item<'r, 's> {
         (T1::get_param(state0, handle),)
     }
 
-    fn build_query_list((state0,): &Self::State, list: &mut Vec<registry_ffi::Query>) {
+    fn build_query_list((state0,): &Self::State, list: &mut Vec<QuerySetIndex>) {
         T1::build_query_list(state0, list);
     }
 }
@@ -119,18 +143,18 @@ where
     type State = (T1::State, T2::State);
     type Item<'r, 's> = (T1::Item<'r, 's>, T2::Item<'r, 's>);
 
-    fn init_state(handle: &mut RegistryMutHandle) -> Self::State {
-        (T1::init_state(handle), T2::init_state(handle))
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
+        (T1::init_state(builder), T2::init_state(builder))
     }
 
     fn get_param<'r, 's>(
         (state0, state1): &'s Self::State,
-        handle: RegistryHandle<'r>,
+        handle: &'r SystemContextOpaque,
     ) -> Self::Item<'r, 's> {
         (T1::get_param(state0, handle), T2::get_param(state1, handle))
     }
 
-    fn build_query_list((state0, state1): &Self::State, list: &mut Vec<registry_ffi::Query>) {
+    fn build_query_list((state0, state1): &Self::State, list: &mut Vec<QuerySetIndex>) {
         T1::build_query_list(state0, list);
         T2::build_query_list(state1, list);
     }
@@ -140,18 +164,18 @@ where
 pub struct FunctionSystem<F: SystemParamFunction<Params> + 'static, Params: SystemParam> {
     system: F,
     state: <F::Params as SystemParam>::State,
-    used_queries: Vec<registry_ffi::Query>,
+    used_queries: Vec<QuerySetIndex>,
 }
 
 impl<F: SystemParamFunction<Params> + 'static, Params: SystemParam> System
     for FunctionSystem<F, Params>
 {
-    extern "C" fn call(&mut self, handle: RegistryHandle) {
-        let arg = F::Params::get_param(&self.state, handle);
+    extern "C" fn call(&mut self, ctx: &SystemContextOpaque) {
+        let arg = F::Params::get_param(&self.state, ctx);
         self.system.run(arg)
     }
 
-    extern "C" fn query_list(&self) -> FfiSlice<&registry_ffi::Query> {
+    extern "C" fn query_list(&self) -> FfiSlice<&ecstasy_ffi::QuerySetIndex> {
         self.used_queries.as_slice().into()
     }
 }

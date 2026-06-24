@@ -1,9 +1,9 @@
-use crate::component_bridge::ComponentIdentityBridge;
+use super::component_bridge::ComponentIdentityBridge;
+use ecstasy_ffi::{ColumnIndex, Component, Entity, EntityIndex};
 use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMut, ErasedMutPointer, ErasedRef},
 };
-use registry_ffi::{ColumnIndex, Component, Entity, EntityIndex};
 use std::{
     fmt::{Debug, Formatter},
     iter::zip,

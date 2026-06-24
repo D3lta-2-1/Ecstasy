@@ -102,14 +102,7 @@ create_index!(
     QuerySetIndex,
     "unique identifier for a ``QuerySet`` in the registry"
 );
-create_index!(QueryMutabilityIndex, "a unique identifier for a ``Query``");
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct Query {
-    pub set: QuerySetIndex,
-    pub mutability: QueryMutabilityIndex,
-}
+create_index!(EventIndex, "a unique identifier for an Event type");
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -119,15 +112,14 @@ pub struct EntityLocation {
 }
 
 /// a fully qualified component identity, used to get ComponentData from a component path and name.
-/// it also checks that the layout matches to avoid type mismatches.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComponentIdentity {
+pub struct TypeIdentity {
     pub path: FfiSlice<&'static u8>,
     pub name: FfiSlice<&'static u8>,
 }
 
-impl Debug for ComponentIdentity {
+impl Debug for TypeIdentity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let path = str::from_utf8(&self.path).unwrap_or("[non valid utf8]");
         let name = str::from_utf8(&self.name).unwrap_or("[non valid utf8]");
@@ -139,16 +131,17 @@ impl Debug for ComponentIdentity {
     }
 }
 
-impl ComponentIdentity {
+impl TypeIdentity {
     pub const EMPTY: Self = Self {
         path: FfiSlice::from_str("ecstasy"),
         name: FfiSlice::from_str("ecstasy"),
     };
 }
 
+#[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub struct ComponentDescriptor {
-    pub identity: ComponentIdentity,
+pub struct TypeDescriptor {
+    pub identity: TypeIdentity,
     pub type_info: TypeInfo,
 }
 
@@ -163,10 +156,7 @@ pub enum RegistryError {
 #[vtable]
 pub trait Registry {
     /// Find the Entity that represent a given component
-    extern "C" fn find_or_register_component(
-        &mut self,
-        component: &ComponentDescriptor,
-    ) -> Component;
+    extern "C" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component;
     /// Create a new Entity id, the new entity can be queried in empty queries.
     extern "C" fn create_empty_entity(&mut self) -> Entity;
     extern "C" fn create_entity<'a>(
@@ -185,15 +175,15 @@ pub trait Registry {
     extern "C" fn get_one_component(
         &self,
         entity: Entity,
-        identity: ComponentIdentity,
+        identity: TypeIdentity,
     ) -> FfiResult<ErasedRef<'_>, RegistryError>;
     extern "C" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError>;
 
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
-    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> Query;
+    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex;
 
-    extern "C" fn get_query<'a>(&'a self, id: QuerySetIndex) -> QuerySetHandle<'a>;
+    extern "C" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque;
 
     ///write the start of the asked column in the ``start`` parameter, and provide a slice on the associated Entities
     unsafe extern "C" fn get_column_begin<'a>(
@@ -212,7 +202,7 @@ pub trait Registry {
 #[vtable]
 pub trait QuerySet {
     /// return the ``LocalColumnIndex`` of a Component, panic if it doesn't belong to the query
-    extern "C" fn get_local_column_index(&self, identity: &ComponentIdentity) -> LocalColumnIndex;
+    extern "C" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex;
     /// return an array that map the LocalColumnIndex to the real column in a given Archetype.
     extern "C" fn columns_index_for_archetype(
         &self,
@@ -231,12 +221,35 @@ pub enum ComponentMutability {
 pub struct QueryBuilder<'a> {
     /// both slices must be the same size, on contain
     pub requested_components: FfiSlice<&'a Component>,
-    pub mutabilities: FfiSlice<&'a ComponentMutability>,
+}
+
+#[vtable]
+pub trait Publisher {
+    extern "C" fn push(&mut self, value: DropLocation);
+}
+
+/// Used to create and store system before they are ran as a scheduler.
+#[vtable]
+pub trait SchedulerBuilder {
+    /// mainly used to during system creation
+    extern "C" fn registry(&mut self) -> &mut RegistryOpaque;
+    extern "C" fn find_event(&mut self, event: TypeDescriptor) -> EventIndex;
+    extern "C" fn add_system(
+        &mut self,
+        system: DropLocation<SystemOpaque>,
+        vtable: &'static SystemVtable,
+    );
+}
+
+#[vtable]
+pub trait SystemContext {
+    extern "C" fn registry(&self) -> &RegistryOpaque;
+    unsafe extern "C" fn get_publisher(&self, event: EventIndex) -> PublisherHandle<'_>;
 }
 
 /// Used to represent a system in the ECS, the system have to be honest, and precisely use the Queries it asked for
 #[vtable]
 pub trait System {
-    extern "C" fn call(&mut self, registry_handle: RegistryHandle);
-    extern "C" fn query_list(&self) -> FfiSlice<&Query>;
+    extern "C" fn call(&mut self, context: &SystemContextOpaque);
+    extern "C" fn query_list(&self) -> FfiSlice<&QuerySetIndex>;
 }

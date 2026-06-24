@@ -1,5 +1,5 @@
-use crate::{EntityLocation, MovedEntity};
-use registry_ffi::Entity;
+use super::{EntityLocation, MovedEntity};
+use ecstasy_ffi::Entity;
 
 #[derive(Default)]
 /// Store where entity are located in the registry, and manage entity id allocation

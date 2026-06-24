@@ -1,18 +1,19 @@
-use crate::{
+use super::{
     ArchetypeIndex, ColumnIndex, EntityLocation, MovedEntity,
     archetype::{Archetype, ComponentValueLocation},
     component_bridge::ComponentIdentityBridge,
-    index_storage::IndexStorage,
-    merge_iter::MergeIter,
     query::QuerySet,
     query_manager::QueryManager,
+};
+
+use crate::{index_storage::IndexStorage, merge_iter::MergeIter};
+
+use ecstasy_ffi::{
+    Component, Entity, LocalColumnIndex, RegistryError, TypeDescriptor, TypeIdentity,
 };
 use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMutPointer, ErasedRef},
-};
-use registry_ffi::{
-    Component, ComponentDescriptor, ComponentIdentity, Entity, LocalColumnIndex, RegistryError,
 };
 use std::{collections::HashMap, iter::zip};
 
@@ -50,7 +51,7 @@ impl ArchetypeManager {
     }
 
     /// create a new link between a ``ComponentDescriptor`` and an ``Entity``
-    pub fn add_new_component_mapping(&mut self, component: ComponentDescriptor, entity: Entity) {
+    pub fn add_new_component_mapping(&mut self, component: TypeDescriptor, entity: Entity) {
         self.component_bridge.add(component, entity);
     }
 
@@ -81,7 +82,7 @@ impl ArchetypeManager {
             archetype_index,
             entity_index,
         }: EntityLocation,
-        component: ComponentIdentity,
+        component: TypeIdentity,
     ) -> Result<ErasedRef<'_>, RegistryError> {
         let component = self
             .component_bridge
@@ -156,7 +157,7 @@ impl ArchetypeManager {
         archetype_index
     }
 
-    pub fn find_component(&self, component: &ComponentIdentity) -> Option<Entity> {
+    pub fn find_component(&self, component: &TypeIdentity) -> Option<Entity> {
         self.component_bridge.find_component(component)
     }
 

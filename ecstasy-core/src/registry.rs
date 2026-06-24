@@ -2,29 +2,28 @@ mod archetype;
 mod archetype_manager;
 mod component_bridge;
 mod entity_manager;
-mod index_storage;
-mod merge_iter;
-mod query;
+
+pub mod query;
 mod query_manager;
 
+use crate::merge_iter::MergeIter;
 use archetype_manager::ArchetypeManager;
 use entity_manager::EntityManager;
-use merge_iter::MergeIter;
 use query_manager::QueryManager;
 use reflexion::erased::{ErasedMutPointer, ErasedRef};
 
-pub use registry_ffi::{
-    ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QuerySetIndex,
+use ecstasy_ffi::{
+    self, Component, Entity, QueryBuilder, QuerySetOpaque, QuerySetVtableExt, RegistryError,
+    TypeDescriptor, TypeIdentity,
 };
-use registry_ffi::{
-    Component, ComponentDescriptor, ComponentIdentity, Entity, Query, QueryBuilder, QuerySetHandle,
-    QuerySetVtableExt, RegistryError,
+pub use ecstasy_ffi::{
+    ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QuerySetIndex,
 };
 use std::{iter, iter::zip};
 
 use reflexion::drop_location::DropLocation;
 
-pub(crate) struct MovedEntity {
+pub struct MovedEntity {
     entity: Entity,
     new_location: EntityLocation,
 }
@@ -151,7 +150,7 @@ impl Registry {
     pub fn get_one_component(
         &'_ self,
         entity: Entity,
-        identity: ComponentIdentity,
+        identity: TypeIdentity,
     ) -> Result<ErasedRef<'_>, RegistryError> {
         let loc = self
             .entities
@@ -169,11 +168,8 @@ impl Registry {
 
 use reflexion::{ffi_collection::FfiCollectionIter, ffi_enum::FfiResult, ffi_slice::FfiSlice};
 
-impl registry_ffi::Registry for Registry {
-    extern "C" fn find_or_register_component(
-        &mut self,
-        component: &ComponentDescriptor,
-    ) -> Component {
+impl ecstasy_ffi::Registry for Registry {
+    extern "C" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component {
         if let Some(e) = self.archetypes.find_component(&component.identity) {
             e
         } else {
@@ -208,7 +204,7 @@ impl registry_ffi::Registry for Registry {
     extern "C" fn get_one_component(
         &self,
         entity: Entity,
-        identity: ComponentIdentity,
+        identity: TypeIdentity,
     ) -> FfiResult<ErasedRef<'_>, RegistryError> {
         self.get_one_component(entity, identity).into()
     }
@@ -217,13 +213,13 @@ impl registry_ffi::Registry for Registry {
         self.location(entity).into()
     }
 
-    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> Query {
+    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex {
         self.queries
             .get_query(builder, |builder| self.archetypes.create_query(builder))
     }
 
-    extern "C" fn get_query<'a>(&'a self, id: QuerySetIndex) -> QuerySetHandle<'a> {
-        self.queries.get_query_set(id).as_handle()
+    extern "C" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque {
+        self.queries.get_query_set(id).as_opaque()
     }
 
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated

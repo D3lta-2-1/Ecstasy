@@ -1,8 +1,8 @@
 [package]
-name = "registry"
+name = "ecstasy-core"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 reflexion.workspace = true
-registry-ffi.workspace = true
+ecstasy-ffi.workspace = true

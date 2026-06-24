@@ -1,15 +1,15 @@
+use ecstasy_ffi::{Component, Entity, TypeDescriptor, TypeIdentity};
 use reflexion::typeinfo::{TypeInfo, TypeInfoImpl};
-use registry_ffi::{Component, ComponentDescriptor, ComponentIdentity, Entity};
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct ComponentIdentityBridge {
-    component_to_type_info: HashMap<Entity, ComponentDescriptor>,
-    type_info_from_component: HashMap<ComponentIdentity, Entity>,
+    component_to_type_info: HashMap<Entity, TypeDescriptor>,
+    type_info_from_component: HashMap<TypeIdentity, Entity>,
 }
 
 impl ComponentIdentityBridge {
-    pub fn add(&mut self, component_descriptor: ComponentDescriptor, entity: Entity) {
+    pub fn add(&mut self, component_descriptor: TypeDescriptor, entity: Entity) {
         self.component_to_type_info
             .insert(entity, component_descriptor);
         self.type_info_from_component
@@ -23,7 +23,7 @@ impl ComponentIdentityBridge {
             .unwrap_or(TypeInfoImpl::EMPTY)
     }
 
-    pub fn find_identity(&self, component: &Component) -> Option<ComponentIdentity> {
+    pub fn find_identity(&self, component: &Component) -> Option<TypeIdentity> {
         self.component_to_type_info
             .get(component)
             .map(|descriptor| descriptor.identity)
@@ -33,7 +33,7 @@ impl ComponentIdentityBridge {
         self.find_type_info(component).unwrap().layout.size > 0
     }
 
-    pub fn find_component(&self, component_identity: &ComponentIdentity) -> Option<Component> {
+    pub fn find_component(&self, component_identity: &TypeIdentity) -> Option<Component> {
         self.type_info_from_component
             .get(component_identity)
             .cloned()

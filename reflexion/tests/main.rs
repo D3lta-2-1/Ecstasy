@@ -1,11 +1,14 @@
-use reflexion::{erased::ErasedMutPointer, ffi_slice::FfiSlice};
+use reflexion::{
+    erased::{Any, ErasedMutPointer},
+    ffi_slice::FfiSlice,
+};
 use vtable::vtable;
 
 #[test]
 fn erased() {
     let mut value: i32 = 25;
     unsafe {
-        let ptr = ErasedMutPointer::from_mut(&mut value);
+        let ptr = ErasedMutPointer::<Any>::from_mut(&mut value);
         let cst_ref = ptr.as_erased_ref();
         assert_eq!(*cst_ref.cast::<i32>(), 25);
     }
@@ -45,21 +48,19 @@ impl MovingObject for SomeKindOfLeggedThingy {
     }
 }
 
-// on a un type connu a la compilation, yeay
-fn kesako(moving_object: MovingObjectHandle) {
-    moving_object.introduce_yourself();
-}
-
 #[test]
 fn test_vtable() {
     let car = Vehicle { wheel_number: 4 };
     let cat = SomeKindOfLeggedThingy { leg_number: 4 };
 
-    let car_handle = car.as_handle();
-    let cat_handle = cat.as_handle();
-    println!("car function {:?}", car_handle.vtable.introduce_yourself);
-    println!("cat function {:?}", cat_handle.vtable.introduce_yourself);
-
-    kesako(car_handle);
-    kesako(cat_handle);
+    let car_handle = car.as_opaque();
+    let cat_handle = cat.as_opaque();
+    println!(
+        "car function {:?}",
+        (Vehicle::VTABLE.introduce_yourself)(car_handle)
+    );
+    println!(
+        "cat function {:?}",
+        (SomeKindOfLeggedThingy::VTABLE.introduce_yourself)(cat_handle)
+    );
 }

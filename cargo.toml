@@ -1,21 +1,21 @@
 [package]
-name = "ecstasy"
+name = "Archipel"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["registry", "registry-ffi", "registry-header", "reflexion"]
+members = ["ecstasy-core",  "ecstasy-ffi", "ecstasy", "reflexion"]
 
 [workspace.dependencies]
 reflexion = { path = "reflexion" }
-registry = { path = "registry" }
-registry-ffi = { path = "registry-ffi" }
-registry-header = { path = "registry-header" }
+ecstasy-core = { path = "ecstasy-core" }
+ecstasy-ffi = { path = "ecstasy-ffi" }
+ecstasy = { path = "ecstasy" }
 
 [dev-dependencies]
-registry.workspace = true
-registry-ffi.workspace = true
-registry-header.workspace = true
+ecstasy-core.workspace = true
+ecstasy-ffi.workspace = true
+ecstasy.workspace = true
 
 [dependencies]
 reflexion = { path = "reflexion"}

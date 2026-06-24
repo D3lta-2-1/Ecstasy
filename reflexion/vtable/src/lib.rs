@@ -134,27 +134,6 @@ impl MemberFunctionSignature {
             pub #name: #impl_generics #unsafe_token extern #abi fn(& #self_lifetime #mut_token #opaque_ident, #(#param,)* ) #output,
         }
     }
-
-    fn write_handle_method(&self) -> TokenStream {
-        let name = &self.name;
-        let self_lifetime = &self.lifetime;
-        let param = &self.inputs;
-        let pats: Vec<_> = self.inputs.iter().map(|pat| &*pat.pat).collect();
-        let output = self.output.clone().into_token_stream();
-        let (impl_generics, _, where_clause) = self.generics.split_for_impl();
-
-        let mut_token = self.mutability.then_some(quote! {mut});
-        let unsafe_token = self.unsafety.then_some(quote! {unsafe});
-        let impl_generics = (!self.generics.params.is_empty()).then_some(quote! {#impl_generics});
-
-        quote! {
-            pub #unsafe_token fn #name #impl_generics(& #self_lifetime #mut_token self, #(#param,)* ) #output #where_clause {
-                unsafe {
-                    (self.vtable. #name)(self.handle, #(#pats,)*)
-                }
-            }
-        }
-    }
 }
 
 struct ExpansionBuilder {
@@ -205,30 +184,6 @@ impl ExpansionBuilder {
             #(#implems)*
         }
     }
-
-    fn mut_handle_methods(&self) -> TokenStream {
-        let implems: Vec<_> = self
-            .methods
-            .iter()
-            .map(|method| method.write_handle_method())
-            .collect();
-
-        quote! {
-            #(#implems)*
-        }
-    }
-
-    fn handle_methods(&self) -> TokenStream {
-        let implems: Vec<_> = self
-            .methods
-            .iter()
-            .flat_map(|method| (!method.mutability).then(|| method.write_handle_method()))
-            .collect();
-
-        quote! {
-            #(#implems)*
-        }
-    }
 }
 
 fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
@@ -242,10 +197,7 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
 
     let method_names: Vec<_> = builder.methods.iter().map(|method| &method.name).collect();
 
-    let mut_handle = format_ident!("{}MutHandle", name);
-    let mut_handle_methods = builder.mut_handle_methods();
     let handle = format_ident!("{}Handle", name);
-    let handle_methods = builder.handle_methods();
 
     let expanded = quote! {
         #input
@@ -259,27 +211,19 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
 
         impl ::reflexion::opaque::Opaque for #opaque_type {
             type Handle<'a> = #handle<'a>;
-            type MutHandle<'a> = #mut_handle<'a>;
             type Vtable = #vtable_name;
 
-            unsafe fn handle<'a>(handle: *const Self, vtable:  &'static Self::Vtable) -> Self::Handle<'a> {
+            unsafe fn handle<'a>(handle: *mut Self, vtable:  &'static Self::Vtable) -> Self::Handle<'a> {
                 unsafe {
                     #handle {
-                        handle: &*handle,
-                        vtable,
-                    }
-                }
-            }
-
-            unsafe fn mut_handle<'a>(handle: *mut Self, vtable:  &'static Self::Vtable) -> Self::MutHandle<'a> {
-                unsafe {
-                    #mut_handle {
                         handle: &mut *handle,
                         vtable,
                     }
                 }
             }
         }
+
+        unsafe impl ::reflexion::erased::ZeroSized for #opaque_type {}
 
         #[repr(C)]
         pub struct #vtable_name {
@@ -291,29 +235,27 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
                 #(#method_names: ::std::mem::transmute(Self::#method_names as *const ()),)*
             }};
 
-            fn as_handle(&self) -> #handle<'_> {
+            fn as_opaque(&self) -> &#opaque_type {
                 unsafe {
                     let handle = self as *const Self as *const #opaque_type;
-                    #handle {
-                        handle: &*handle,
-                        vtable: &Self::VTABLE,
-                    }
+                    &*handle
                 }
             }
 
-            fn as_mut_handle<'a>(&'a mut self) -> #mut_handle<'a> {
+            fn as_opaque_mut(&mut self) -> &mut #opaque_type {
                 unsafe {
                     let handle = self as *mut Self as *mut #opaque_type;
-                    #mut_handle {
+                    &mut *handle
+                }
+            }
+
+            fn as_handle<'a>(&'a mut self) -> #handle<'a> {
+                unsafe {
+                    let handle = self as *mut Self as *mut #opaque_type;
+                    #handle {
                         handle: &mut *handle,
                         vtable: &Self::VTABLE,
                     }
-                }
-            }
-
-            fn boxed(self) -> ::reflexion::ffi_box::FfiBox<#opaque_type> {
-                unsafe {
-                    <::reflexion::ffi_box::FfiBox<#opaque_type>>::new(self, &Self::VTABLE)
                 }
             }
         }
@@ -321,34 +263,12 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
         impl<T: #name> #trait_ext_name for T {}
 
         #[repr(C)]
-        pub struct #mut_handle<'handle_lifetime> {
-            handle: &'handle_lifetime mut #opaque_type,
-            vtable: &'static #vtable_name,
-        }
-
-        impl #mut_handle<'_> {
-            pub fn as_const(&self) -> #handle  {
-                #handle {
-                    handle: &self.handle,
-                    vtable: &self.vtable,
-                }
-            }
-        }
-
-        impl #mut_handle<'_> {
-            #mut_handle_methods
-        }
-
-        #[repr(C)]
-        #[derive(Copy, Clone)]
         pub struct #handle<'handle_lifetime> {
-            handle: &'handle_lifetime #opaque_type,
-            vtable: &'static #vtable_name,
+            pub handle: &'handle_lifetime mut #opaque_type,
+            pub vtable: &'static #vtable_name,
         }
 
         impl<'handle_lifetime> #handle<'handle_lifetime> {
-            #handle_methods
-
             pub unsafe fn downcast<T: #name>(self) -> &'handle_lifetime T {
                 unsafe {
                     let ptr = self.handle as *const #opaque_type as *const T;
@@ -363,7 +283,7 @@ fn vtable_impl(input: ItemTrait) -> Result<TokenStream> {
 
 /// a utility macro to build explicit vtable for any trait,
 /// the given trait should only contain "methods" shloudn't use async functions
-// TODO: add support for functions where self appear multiple times ! which remaing unsupported for now
+// TODO: add support for functions where self appear multiple times ! which remain unsupported for now
 #[proc_macro_attribute]
 pub fn vtable(
     _attr: proc_macro::TokenStream,

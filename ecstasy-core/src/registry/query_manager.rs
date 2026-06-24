@@ -1,10 +1,6 @@
-use crate::{
-    ArchetypeIndex, QuerySetIndex,
-    archetype_manager::ArchetypeManager,
-    index_storage::IndexStorage,
-    query::{QueryMutability, QuerySet},
-};
-use registry_ffi::{Component, Query, QueryBuilder, QueryMutabilityIndex};
+use super::{ArchetypeIndex, QuerySetIndex, archetype_manager::ArchetypeManager, query::QuerySet};
+use crate::index_storage::IndexStorage;
+use ecstasy_ffi::{Component, QueryBuilder};
 use std::{cmp::Ordering, collections::HashMap};
 
 /// store and maintain Query.
@@ -14,8 +10,6 @@ pub struct QueryManager {
     query_sets: IndexStorage<QuerySetIndex, QuerySet>, //I didn't find a smarter way than iterating through all queries to find candidates in case of an archetype match
     // since archetype creation should be occasional, it shouldn't be an issue
     builder_to_query_sets: HashMap<Vec<Component>, QuerySetIndex>, //The whole point of querySet is optimizing maintenance cost (archetype addition)
-    query_mutabilities: IndexStorage<QueryMutabilityIndex, QueryMutability>,
-    builder_to_query_mutabilities: HashMap<QueryMutability, QueryMutabilityIndex>,
 }
 
 fn contain<T: Ord>(container: &[T], contained: &[T]) -> bool {
@@ -56,27 +50,13 @@ impl QueryManager {
         index
     }
 
-    fn insert_query_mutability(&mut self, builder: QueryMutability) -> QueryMutabilityIndex {
-        if let Some(index) = self.builder_to_query_mutabilities.get(&builder) {
-            return *index;
-        }
-        let index = self.query_mutabilities.push(builder.clone());
-        self.builder_to_query_mutabilities.insert(builder, index);
-        index
-    }
-
     pub fn get_query(
         &mut self,
         builder: QueryBuilder,
         queryset_builder: impl Fn(Vec<Component>) -> QuerySet,
-    ) -> Query {
+    ) -> QuerySetIndex {
         let requested_components = builder.requested_components.to_vec();
-        let mutabilities = builder.mutabilities.to_vec();
-
-        Query {
-            set: self.insert_query_set(requested_components, queryset_builder),
-            mutability: self.insert_query_mutability(QueryMutability { mutabilities }),
-        }
+        self.insert_query_set(requested_components, queryset_builder)
     }
 
     /// update all QuerySet that are concerned by the change

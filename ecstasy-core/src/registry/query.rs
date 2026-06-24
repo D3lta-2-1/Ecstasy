@@ -1,8 +1,8 @@
-use crate::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
-use reflexion::{ffi_enum::FfiResult, ffi_slice::FfiSlice};
-use registry_ffi::{
-    Component, ComponentIdentity, ComponentMutability, LocalColumnIndex, RegistryError,
+use super::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
+use ecstasy_ffi::{
+    self, Component, ComponentMutability, LocalColumnIndex, RegistryError, TypeIdentity,
 };
+use reflexion::{ffi_enum::FfiResult, ffi_slice::FfiSlice};
 use std::collections::HashMap;
 
 /// a QuerySet is a shortcut to access archetypes, being part of the registry storage, that share common properties
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 /// it gather all archetype that share a common set of components, but doesn't care about mutability
 pub struct QuerySet {
     pub(crate) requested_components: Vec<Component>, // contain all components, even unsized components
-    pub(crate) accessible_components: HashMap<ComponentIdentity, LocalColumnIndex>, // only keep sized components, should I store the "associated components instead ?"
+    pub(crate) accessible_components: HashMap<TypeIdentity, LocalColumnIndex>, // only keep sized components, should I store the "associated components instead ?"
     pub(crate) archetypes: HashMap<ArchetypeIndex, Vec<ColumnIndex>>, //where stuff is located in the archetype.
 }
 
@@ -36,14 +36,8 @@ impl QuerySet {
     }
 }
 
-// A full Query is a QueryMutability and a QuerySet together
-#[derive(PartialEq, Eq, Hash, Clone)]
-pub struct QueryMutability {
-    pub mutabilities: Vec<ComponentMutability>,
-}
-
-impl registry_ffi::QuerySet for QuerySet {
-    extern "C" fn get_local_column_index(&self, identity: &ComponentIdentity) -> LocalColumnIndex {
+impl ecstasy_ffi::QuerySet for QuerySet {
+    extern "C" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex {
         self.accessible_components
             .get(identity)
             .expect("this component isn't part of the query")

@@ -3,13 +3,38 @@
 version = 4
 
 [[package]]
+name = "Archipel"
+version = "0.1.0"
+dependencies = [
+ "ecstasy",
+ "ecstasy-core",
+ "ecstasy-ffi",
+ "reflexion",
+]
+
+[[package]]
 name = "ecstasy"
 version = "0.1.0"
 dependencies = [
+ "ecstasy-ffi",
+ "paste",
+ "permutation",
  "reflexion",
- "registry",
- "registry-ffi",
- "registry-header",
+]
+
+[[package]]
+name = "ecstasy-core"
+version = "0.1.0"
+dependencies = [
+ "ecstasy-ffi",
+ "reflexion",
+]
+
+[[package]]
+name = "ecstasy-ffi"
+version = "0.1.0"
+dependencies = [
+ "reflexion",
 ]
 
 [[package]]
@@ -47,31 +72,6 @@ name = "reflexion"
 version = "0.1.0"
 dependencies = [
  "vtable",
-]
-
-[[package]]
-name = "registry"
-version = "0.1.0"
-dependencies = [
- "reflexion",
- "registry-ffi",
-]
-
-[[package]]
-name = "registry-ffi"
-version = "0.1.0"
-dependencies = [
- "reflexion",
-]
-
-[[package]]
-name = "registry-header"
-version = "0.1.0"
-dependencies = [
- "paste",
- "permutation",
- "reflexion",
- "registry-ffi",
 ]
 
 [[package]]
