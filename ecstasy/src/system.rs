@@ -1,10 +1,11 @@
 use crate::{
-    event::{Event, Publisher},
+    event::{Consumer, Event, Producer},
     loader::{SchedulerBuilderLoader, SystemContextLoader},
     query::{Query, QueryBundle, QueryState},
 };
 use ecstasy_ffi::{
-    self, EventIndex, QuerySetIndex, SchedulerBuilderOpaque, System, SystemContextOpaque,
+    self, BorrowedResource, ComponentMutability, EventIndex, EventUsage, SchedulerBuilderOpaque,
+    System, SystemContextOpaque,
 };
 use reflexion::ffi_slice::FfiSlice;
 
@@ -23,13 +24,47 @@ where
     type System = FunctionSystem<F, Params>;
 
     fn into_system(self, builder: &mut SchedulerBuilderOpaque) -> Self::System {
-        let mut used_queries = Vec::new();
+        let mut borrowed_resources = Vec::new();
         let state = F::Params::init_state(builder);
-        F::Params::build_query_list(&state, &mut used_queries);
+        F::Params::build_query_list(&state, &mut borrowed_resources);
+        borrowed_resources.sort_unstable();
+
+        // test is the system can be built
+        for pair in borrowed_resources.array_windows::<2>() {
+            match pair {
+                [
+                    BorrowedResource::Component {
+                        component: component_a,
+                        mutability: mutability_a,
+                    },
+                    BorrowedResource::Component {
+                        component: component_b,
+                        mutability: mutability_b,
+                    },
+                ] if component_a == component_b => {
+                    assert_eq!(
+                        *mutability_a,
+                        ComponentMutability::Const,
+                        "this system fetch the same component multiples times with conflicting mutabilities"
+                    );
+                    assert_eq!(
+                        *mutability_b,
+                        ComponentMutability::Const,
+                        "this system fetch the same component multiples times with conflicting mutabilities"
+                    );
+                }
+                [
+                    BorrowedResource::Event { event: a, .. },
+                    BorrowedResource::Event { event: b, .. },
+                ] => assert_ne!(a, b, "the same event can't be used twice inside a system"),
+                _ => (),
+            }
+        }
+
         FunctionSystem {
             system: self,
             state,
-            used_queries,
+            borrowed_resources,
         }
     }
 }
@@ -69,7 +104,8 @@ pub trait SystemParam {
         ctx: &'scheduler SystemContextOpaque,
     ) -> Self::Item<'scheduler, 'state>;
 
-    fn build_query_list(_state: &Self::State, _list: &mut Vec<QuerySetIndex>) {}
+    /// gather all resources borrowed by this system to compute compatibility with other systems
+    fn build_query_list(_state: &Self::State, _list: &mut Vec<BorrowedResource>);
 }
 
 pub type SystemParamItem<'r, 's, P> = <P as SystemParam>::Item<'r, 's>;
@@ -90,25 +126,68 @@ impl<Bundle: QueryBundle + 'static> SystemParam for Query<'_, '_, Bundle> {
         state.promote(registry)
     }
 
-    fn build_query_list(state: &Self::State, list: &mut Vec<QuerySetIndex>) {
-        list.push(state.id);
+    fn build_query_list(state: &Self::State, list: &mut Vec<BorrowedResource>) {
+        list.extend_from_slice(state.get_borrowed_resources());
     }
 }
 
-impl<T: Event> SystemParam for Publisher<'_, T> {
+impl<T: Event> SystemParam for Producer<'_, T> {
     type State = EventIndex;
 
-    type Item<'scheduler, 'state> = Publisher<'scheduler, T>;
+    type Item<'scheduler, 'state> = Producer<'scheduler, T>;
 
     fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
         SchedulerBuilderLoader::find_event(builder, T::DESCRIPTOR)
     }
 
     fn get_param<'scheduler, 'state>(
-        _state: &'state Self::State,
-        _ctx: &'scheduler SystemContextOpaque,
+        state: &'state Self::State,
+        ctx: &'scheduler SystemContextOpaque,
     ) -> Self::Item<'scheduler, 'state> {
-        todo!()
+        unsafe {
+            let producer = SystemContextLoader::get_publisher(ctx, *state);
+            Producer {
+                inner: producer,
+                phantom: std::marker::PhantomData,
+            }
+        }
+    }
+
+    fn build_query_list(state: &Self::State, list: &mut Vec<BorrowedResource>) {
+        list.push(BorrowedResource::Event {
+            usage: EventUsage::Producer,
+            event: *state,
+        });
+    }
+}
+
+impl<T: Event> SystemParam for Consumer<'_, T> {
+    type State = EventIndex;
+
+    type Item<'scheduler, 'state> = Consumer<'scheduler, T>;
+
+    fn init_state(builder: &mut SchedulerBuilderOpaque) -> Self::State {
+        SchedulerBuilderLoader::find_event(builder, T::DESCRIPTOR)
+    }
+
+    fn get_param<'scheduler, 'state>(
+        state: &'state Self::State,
+        ctx: &'scheduler SystemContextOpaque,
+    ) -> Self::Item<'scheduler, 'state> {
+        unsafe {
+            let consumer = SystemContextLoader::get_consumer(ctx, *state);
+            Consumer {
+                inner: consumer,
+                phantom: std::marker::PhantomData,
+            }
+        }
+    }
+
+    fn build_query_list(state: &Self::State, list: &mut Vec<BorrowedResource>) {
+        list.push(BorrowedResource::Event {
+            usage: EventUsage::Consumer,
+            event: *state,
+        });
     }
 }
 
@@ -130,7 +209,7 @@ where
         (T1::get_param(state0, handle),)
     }
 
-    fn build_query_list((state0,): &Self::State, list: &mut Vec<QuerySetIndex>) {
+    fn build_query_list((state0,): &Self::State, list: &mut Vec<BorrowedResource>) {
         T1::build_query_list(state0, list);
     }
 }
@@ -154,7 +233,7 @@ where
         (T1::get_param(state0, handle), T2::get_param(state1, handle))
     }
 
-    fn build_query_list((state0, state1): &Self::State, list: &mut Vec<QuerySetIndex>) {
+    fn build_query_list((state0, state1): &Self::State, list: &mut Vec<BorrowedResource>) {
         T1::build_query_list(state0, list);
         T2::build_query_list(state1, list);
     }
@@ -164,18 +243,18 @@ where
 pub struct FunctionSystem<F: SystemParamFunction<Params> + 'static, Params: SystemParam> {
     system: F,
     state: <F::Params as SystemParam>::State,
-    used_queries: Vec<QuerySetIndex>,
+    borrowed_resources: Vec<BorrowedResource>,
 }
 
 impl<F: SystemParamFunction<Params> + 'static, Params: SystemParam> System
     for FunctionSystem<F, Params>
 {
-    extern "C" fn call(&mut self, ctx: &SystemContextOpaque) {
+    extern "C-unwind" fn call(&mut self, ctx: &SystemContextOpaque) {
         let arg = F::Params::get_param(&self.state, ctx);
         self.system.run(arg)
     }
 
-    extern "C" fn query_list(&self) -> FfiSlice<&ecstasy_ffi::QuerySetIndex> {
-        self.used_queries.as_slice().into()
+    extern "C-unwind" fn borrowed_resources(&self) -> FfiSlice<&BorrowedResource> {
+        self.borrowed_resources.as_slice().into()
     }
 }

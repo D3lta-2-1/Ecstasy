@@ -6,7 +6,7 @@ use crate::{
     drop_location::DropLocation,
     typeinfo::{TypeInfo, TypeInfoProvider},
 };
-use std::{fmt::Debug, marker::PhantomData, mem, ptr::NonNull};
+use std::{fmt::Debug, marker::PhantomData, mem, ptr::NonNull, slice};
 
 /// a Trait used to define
 pub unsafe trait ZeroSized {}
@@ -181,6 +181,13 @@ impl<PTR: ZeroSized> ErasedMutPointer<PTR> {
         unsafe {
             let ptr = self.data.as_ptr() as *mut PTR;
             &mut *ptr
+        }
+    }
+
+    pub unsafe fn as_slice<'a, T>(self, len: usize) -> &'a [T] {
+        unsafe {
+            let data = self.data.as_ptr() as *const T;
+            slice::from_raw_parts::<T>(data, len)
         }
     }
 

@@ -1,9 +1,10 @@
 use std::sync::OnceLock;
 
 use ecstasy_ffi::{
-    ArchetypeIndex, ColumnIndex, Component, Entity, EntityLocation, EventIndex, LocalColumnIndex,
-    QueryBuilder, QuerySetIndex, QuerySetOpaque, QuerySetVtable, RegistryError, RegistryOpaque,
-    RegistryVtable, SystemContextVtable, TypeDescriptor, TypeIdentity,
+    ArchetypeIndex, ColumnIndex, Component, ConsumerOpaque, ConsumerVtable, Entity, EntityLocation,
+    EventIndex, LocalColumnIndex, ProducerOpaque, ProducerVtable, QueryBuilder, QuerySetIndex,
+    QuerySetOpaque, QuerySetVtable, RegistryError, RegistryOpaque, RegistryVtable,
+    SystemContextVtable, TypeDescriptor, TypeIdentity,
 };
 use reflexion::{
     drop_location::DropLocation,
@@ -13,8 +14,7 @@ use reflexion::{
 };
 
 use ecstasy_ffi::{
-    PublisherHandle, SchedulerBuilderOpaque, SchedulerBuilderVtable, SystemContextOpaque,
-    SystemOpaque, SystemVtable,
+    SchedulerBuilderOpaque, SchedulerBuilderVtable, SystemContextOpaque, SystemOpaque, SystemVtable,
 };
 
 // TODO: implement statically linked registry using cargo feature
@@ -25,6 +25,8 @@ pub struct EcstasyContext {
     pub query_set: &'static QuerySetVtable,
     pub scheduler_builder: &'static SchedulerBuilderVtable,
     pub system_context: &'static SystemContextVtable,
+    pub producer: &'static ProducerVtable,
+    pub consumer: &'static ConsumerVtable,
 }
 
 /// a mapping to a the function of a registry, it can be both loaded from a DLL or resolved at compile time
@@ -47,6 +49,8 @@ pub struct RegistryLoader;
 pub struct QuerySetLoader;
 pub struct SchedulerBuilderLoader;
 pub struct SystemContextLoader;
+pub struct ProducerLoader;
+pub struct ConsumerLoader;
 
 impl RegistryLoader {
     fn get() -> &'static RegistryVtable {
@@ -179,7 +183,35 @@ impl SystemContextLoader {
     pub unsafe fn get_publisher(
         opaque: &SystemContextOpaque,
         event: EventIndex,
-    ) -> PublisherHandle<'_> {
+    ) -> &mut ProducerOpaque {
         unsafe { (Self::get().get_publisher)(opaque, event) }
+    }
+
+    pub unsafe fn get_consumer(opaque: &SystemContextOpaque, event: EventIndex) -> &ConsumerOpaque {
+        unsafe { (Self::get().get_consumer)(opaque, event) }
+    }
+}
+
+impl ProducerLoader {
+    fn get() -> &'static ProducerVtable {
+        CONTEXT.get().expect("ecstasy not yet loaded").producer
+    }
+
+    pub unsafe fn push(opaque: &mut ProducerOpaque, value: DropLocation) {
+        unsafe { (Self::get().push)(opaque, value) }
+    }
+}
+
+impl ConsumerLoader {
+    fn get() -> &'static ConsumerVtable {
+        CONTEXT.get().expect("ecstasy not yet loaded").consumer
+    }
+
+    pub unsafe fn events<T>(opaque: &ConsumerOpaque) -> &[T] {
+        unsafe {
+            let mut len = 0;
+            let ptr = (Self::get().events)(opaque, &mut len);
+            ptr.as_slice(len)
+        }
     }
 }

@@ -1,6 +1,8 @@
 use std::{cell::UnsafeCell, collections::HashMap};
 
-use ecstasy_ffi::{self, EventIndex, PublisherVtableExt, TypeDescriptor, TypeIdentity};
+use ecstasy_ffi::{
+    self, ConsumerOpaque, ConsumerVtable, ConsumerVtableExt, EventIndex, ProducerOpaque, ProducerVtable, ProducerVtableExt, TypeDescriptor, TypeIdentity
+};
 use reflexion::{drop_location::DropLocation, erased::ErasedMutPointer, typeinfo::TypeInfo};
 
 use crate::index_storage::IndexStorage;
@@ -12,6 +14,12 @@ pub struct EventManager {
 }
 
 impl EventManager {
+    pub fn clear(&mut self) {
+        for storage in self.events.values_mut() {
+            storage.get_mut().clear();
+        }
+    }
+
     pub fn find_event(&mut self, descriptor: TypeDescriptor) -> EventIndex {
         let v = self.map.entry(descriptor.identity).or_insert_with(|| {
             self.events
@@ -20,24 +28,28 @@ impl EventManager {
         *v
     }
 
-    pub unsafe fn get_unchecked_publisher(
-        &self,
-        id: EventIndex,
-    ) -> ecstasy_ffi::PublisherHandle<'_> {
+    pub unsafe fn get_unchecked_publisher(&self, id: EventIndex) -> &mut ProducerOpaque {
         unsafe {
             let vec = &mut *self.events[id].get();
-            vec.as_handle()
+            <EreasedVec as ProducerVtableExt>::as_opaque_mut(vec)
+        }
+    }
+
+    pub unsafe fn get_unchecked_consumer(&self, id: EventIndex) -> &ConsumerOpaque {
+        unsafe {
+            let vec = &*self.events[id].get();
+            <EreasedVec as ConsumerVtableExt>::as_opaque(vec)
         }
     }
 }
 
-struct EreasedVec {
+pub struct EreasedVec {
     data: ErasedMutPointer,
     len: usize,
     capacity: usize,
 }
 
-/// a storage for ea
+/// a storage for each event
 impl EreasedVec {
     pub fn new(type_info: TypeInfo) -> Self {
         Self {
@@ -45,6 +57,17 @@ impl EreasedVec {
             len: 0,
             capacity: 0,
         }
+    }
+
+    pub fn clear(&mut self) {
+        if self.data.type_info.is_some_and(|info| info.need_drop) {
+            for i in 0..self.len() {
+                unsafe {
+                    self.data.offset(i).drop_in_place();
+                }
+            }
+        }
+        self.len = 0;
     }
 
     pub fn len(&self) -> usize {
@@ -78,8 +101,18 @@ impl EreasedVec {
     }
 }
 
-impl ecstasy_ffi::Publisher for EreasedVec {
-    extern "C" fn push(&mut self, value: DropLocation) {
+pub const PRODUCER_VTABLE: &'static ProducerVtable = &<EreasedVec as ProducerVtableExt>::VTABLE;
+pub const CONSUMER_VTABLE: &'static ConsumerVtable = &<EreasedVec as ConsumerVtableExt>::VTABLE;
+
+impl ecstasy_ffi::Producer for EreasedVec {
+    unsafe extern "C-unwind" fn push(&mut self, value: DropLocation) {
         self.push(value);
+    }
+}
+
+impl ecstasy_ffi::Consumer for EreasedVec {
+    unsafe extern "C-unwind" fn events(&self, len: &mut usize) -> ErasedMutPointer {
+        *len = self.len();
+        self.data
     }
 }

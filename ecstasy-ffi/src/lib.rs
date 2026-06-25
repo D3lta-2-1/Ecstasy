@@ -8,6 +8,7 @@ use reflexion::{
     vtable,
 };
 use std::{
+    cmp::Ordering,
     fmt::{Debug, Formatter},
     num::NonZeroU32,
 };
@@ -156,15 +157,15 @@ pub enum RegistryError {
 #[vtable]
 pub trait Registry {
     /// Find the Entity that represent a given component
-    extern "C" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component;
+    extern "C-unwind" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component;
     /// Create a new Entity id, the new entity can be queried in empty queries.
-    extern "C" fn create_empty_entity(&mut self) -> Entity;
-    extern "C" fn create_entity<'a>(
+    extern "C-unwind" fn create_empty_entity(&mut self) -> Entity;
+    extern "C-unwind" fn create_entity<'a>(
         &mut self,
         components: FfiSlice<&Component>,
         values: FfiCollectionIter<DropLocation<'a>>,
     ) -> Entity;
-    extern "C" fn add_components<'s: 'a, 'a>(
+    extern "C-unwind" fn add_components<'s: 'a, 'a>(
         &'s mut self,
         entity: Entity,
         components: FfiSlice<&Component>,
@@ -172,21 +173,21 @@ pub trait Registry {
     ) -> FfiResult<(), RegistryError>;
     /// get a component from its Identity
     // TODO: consider update ComponentIdentity for Component
-    extern "C" fn get_one_component(
+    extern "C-unwind" fn get_one_component(
         &self,
         entity: Entity,
         identity: TypeIdentity,
     ) -> FfiResult<ErasedRef<'_>, RegistryError>;
-    extern "C" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError>;
+    extern "C-unwind" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError>;
 
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
-    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex;
+    extern "C-unwind" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex;
 
-    extern "C" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque;
+    extern "C-unwind" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque;
 
     ///write the start of the asked column in the ``start`` parameter, and provide a slice on the associated Entities
-    unsafe extern "C" fn get_column_begin<'a>(
+    unsafe extern "C-unwind" fn get_column_begin<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,
         columns: FfiSlice<&ColumnIndex>,
@@ -202,19 +203,12 @@ pub trait Registry {
 #[vtable]
 pub trait QuerySet {
     /// return the ``LocalColumnIndex`` of a Component, panic if it doesn't belong to the query
-    extern "C" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex;
+    extern "C-unwind" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex;
     /// return an array that map the LocalColumnIndex to the real column in a given Archetype.
-    extern "C" fn columns_index_for_archetype(
+    extern "C-unwind" fn columns_index_for_archetype(
         &self,
         archetype_index: ArchetypeIndex,
     ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError>;
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ComponentMutability {
-    Const,
-    Mut,
 }
 
 #[repr(C)]
@@ -224,17 +218,89 @@ pub struct QueryBuilder<'a> {
 }
 
 #[vtable]
-pub trait Publisher {
-    extern "C" fn push(&mut self, value: DropLocation);
+pub trait Producer {
+    unsafe extern "C-unwind" fn push(&mut self, value: DropLocation);
+}
+
+#[vtable]
+pub trait Consumer {
+    // TODO: Add ErasedPointer (const version)
+    unsafe extern "C-unwind" fn events(&self, len: &mut usize) -> ErasedMutPointer;
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ComponentMutability {
+    Const,
+    Mut,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EventUsage {
+    Producer,
+    Consumer,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BorrowedResource {
+    Event {
+        event: EventIndex,
+        usage: EventUsage,
+    },
+    Component {
+        component: Component,
+        mutability: ComponentMutability,
+    },
+}
+
+impl Ord for BorrowedResource {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Event { .. }, Self::Component { .. }) => Ordering::Less,
+            (Self::Component { .. }, Self::Event { .. }) => Ordering::Greater,
+            (
+                Self::Event {
+                    event: self_event,
+                    usage: self_usage,
+                },
+                Self::Event {
+                    event: other_event,
+                    usage: other_usage,
+                },
+            ) => self_event
+                .cmp(other_event)
+                .then(self_usage.cmp(other_usage)),
+            (
+                Self::Component {
+                    component: self_component,
+                    mutability: self_mutability,
+                },
+                Self::Component {
+                    component: other_component,
+                    mutability: other_mutability,
+                },
+            ) => self_component
+                .cmp(other_component)
+                .then(self_mutability.cmp(other_mutability)),
+        }
+    }
+}
+
+impl PartialOrd for BorrowedResource {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Used to create and store system before they are ran as a scheduler.
 #[vtable]
 pub trait SchedulerBuilder {
     /// mainly used to during system creation
-    extern "C" fn registry(&mut self) -> &mut RegistryOpaque;
-    extern "C" fn find_event(&mut self, event: TypeDescriptor) -> EventIndex;
-    extern "C" fn add_system(
+    extern "C-unwind" fn registry(&mut self) -> &mut RegistryOpaque;
+    extern "C-unwind" fn find_event(&mut self, event: TypeDescriptor) -> EventIndex;
+    extern "C-unwind" fn add_system(
         &mut self,
         system: DropLocation<SystemOpaque>,
         vtable: &'static SystemVtable,
@@ -243,13 +309,15 @@ pub trait SchedulerBuilder {
 
 #[vtable]
 pub trait SystemContext {
-    extern "C" fn registry(&self) -> &RegistryOpaque;
-    unsafe extern "C" fn get_publisher(&self, event: EventIndex) -> PublisherHandle<'_>;
+    extern "C-unwind" fn registry(&self) -> &RegistryOpaque;
+    unsafe extern "C-unwind" fn get_publisher(&self, event: EventIndex) -> &mut ProducerOpaque;
+    unsafe extern "C-unwind" fn get_consumer(&self, event: EventIndex) -> &ConsumerOpaque;
 }
 
 /// Used to represent a system in the ECS, the system have to be honest, and precisely use the Queries it asked for
 #[vtable]
 pub trait System {
-    extern "C" fn call(&mut self, context: &SystemContextOpaque);
-    extern "C" fn query_list(&self) -> FfiSlice<&QuerySetIndex>;
+    extern "C-unwind" fn call(&mut self, context: &SystemContextOpaque);
+    // return a slice
+    extern "C-unwind" fn borrowed_resources(&self) -> FfiSlice<&BorrowedResource>;
 }

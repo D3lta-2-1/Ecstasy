@@ -1,15 +1,16 @@
 use ecstasy::{
     Component, Query, RegistryHeader,
+    event::{Consumer, Event, Producer},
     loader::{Ecstasy, EcstasyContext},
     query::QueryState,
 };
 use ecstasy_ffi::{
-    QuerySetVtableExt, RegistryVtableExt, SchedulerBuilderVtableExt, SystemContextVtableExt,
+    Entity, QuerySetVtableExt, RegistryVtableExt, SchedulerBuilderVtableExt, SystemContextVtableExt,
 };
 
 use ecstasy_core::{
     registry::{Registry, query::QuerySet},
-    scheduler::{Scheduler, SchedulerBuilder},
+    scheduler::{CONSUMER_VTABLE, PRODUCER_VTABLE, SchedulerBuilder, SystemContext},
 };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -38,8 +39,20 @@ const CONTEXT: EcstasyContext = EcstasyContext {
     registry: &Registry::VTABLE,
     query_set: &QuerySet::VTABLE,
     scheduler_builder: &SchedulerBuilder::VTABLE,
-    system_context: &Scheduler::VTABLE,
+    system_context: &SystemContext::VTABLE,
+    producer: PRODUCER_VTABLE,
+    consumer: CONSUMER_VTABLE,
 };
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct MyEvent {
+    value: i32,
+}
+
+impl Event for MyEvent {
+    const PATH: &'static str = "test";
+    const NAME: &'static str = "my_event";
+}
 
 #[test]
 fn creation() {
@@ -107,18 +120,49 @@ fn query() {
 fn test_system() {
     let _ = Ecstasy::load(CONTEXT);
     let mut builder_impl = ecstasy_core::scheduler::SchedulerBuilder::new();
-    let mut builder = ecstasy::SchedulerBuilder::new(builder_impl.as_opaque_mut());
+    // plugin space
+    {
+        let mut builder = ecstasy::SchedulerBuilder::new(builder_impl.as_opaque_mut());
 
-    let mut registry = builder.registry();
-    let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
-    let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
-    let _ = registry;
+        let mut registry = builder.registry();
+        let e1 = registry.new_entity((Pos { x: 0.0, y: 7.0 }, Vel { x: 1.0, y: 1.0 }));
+        let _e2 = registry.new_entity(Pos { x: 3.0, y: 6.0 });
+        let _ = registry;
 
-    let system = move |query: Query<(&Pos, &Vel)>| {
-        let (pos, vel) = query.get(e1).unwrap();
-        assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
-        assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
-    };
+        let system = move |query: Query<(&Pos, &Vel)>| {
+            let (pos, vel) = query.get(e1).unwrap();
+            assert_eq!(*pos, Pos { x: 0.0, y: 7.0 });
+            assert_eq!(*vel, Vel { x: 1.0, y: 1.0 });
+        };
 
-    builder.add_systeme(system);
+        builder.add_systeme(system);
+    }
+    let mut scheduler = builder_impl.build();
+    scheduler.tick();
+}
+
+#[test]
+fn test_scheduler() {
+    let _ = Ecstasy::load(CONTEXT);
+    let mut builder_impl = ecstasy_core::scheduler::SchedulerBuilder::new();
+    // plugin space
+    {
+        let mut builder = ecstasy::SchedulerBuilder::new(builder_impl.as_opaque_mut());
+
+        fn system1(mut producer: Producer<MyEvent>) {
+            producer.emit(MyEvent { value: 42 });
+        }
+
+        fn system2(consumer: Consumer<MyEvent>) {
+            for event in consumer.iter() {
+                assert_eq!(event.value, 42, "values doesn't match")
+            }
+        }
+
+        // force reordering !
+        builder.add_systeme(system2);
+        builder.add_systeme(system1);
+    }
+    let mut scheduler = builder_impl.build();
+    scheduler.tick();
 }

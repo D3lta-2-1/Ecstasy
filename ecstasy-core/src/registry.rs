@@ -169,7 +169,7 @@ impl Registry {
 use reflexion::{ffi_collection::FfiCollectionIter, ffi_enum::FfiResult, ffi_slice::FfiSlice};
 
 impl ecstasy_ffi::Registry for Registry {
-    extern "C" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component {
+    extern "C-unwind" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component {
         if let Some(e) = self.archetypes.find_component(&component.identity) {
             e
         } else {
@@ -179,11 +179,11 @@ impl ecstasy_ffi::Registry for Registry {
         }
     }
 
-    extern "C" fn create_empty_entity(&mut self) -> Entity {
+    extern "C-unwind" fn create_empty_entity(&mut self) -> Entity {
         self.create_empty_entity()
     }
 
-    extern "C" fn create_entity<'a>(
+    extern "C-unwind" fn create_entity<'a>(
         &mut self,
         components: FfiSlice<&Component>,
         values: FfiCollectionIter<DropLocation<'a>>,
@@ -191,7 +191,7 @@ impl ecstasy_ffi::Registry for Registry {
         self.create_entity(components.into(), values)
     }
 
-    extern "C" fn add_components<'s: 'a, 'a>(
+    extern "C-unwind" fn add_components<'s: 'a, 'a>(
         &'s mut self,
         entity: Entity,
         components: FfiSlice<&Component>,
@@ -201,7 +201,7 @@ impl ecstasy_ffi::Registry for Registry {
             .into()
     }
 
-    extern "C" fn get_one_component(
+    extern "C-unwind" fn get_one_component(
         &self,
         entity: Entity,
         identity: TypeIdentity,
@@ -209,22 +209,22 @@ impl ecstasy_ffi::Registry for Registry {
         self.get_one_component(entity, identity).into()
     }
 
-    extern "C" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError> {
+    extern "C-unwind" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError> {
         self.location(entity).into()
     }
 
-    extern "C" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex {
+    extern "C-unwind" fn get_query_id(&mut self, builder: QueryBuilder) -> QuerySetIndex {
         self.queries
             .get_query(builder, |builder| self.archetypes.create_query(builder))
     }
 
-    extern "C" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque {
+    extern "C-unwind" fn get_query(&self, id: QuerySetIndex) -> &QuerySetOpaque {
         self.queries.get_query_set(id).as_opaque()
     }
 
     //TODO: mutability here is really unclear, this function is used in query, where it's forbidden to add/delete, but components can be mutated
     // I'm considering adding atomis in the ECS to explicitly catch case where the same column is borrowed twice
-    unsafe extern "C" fn get_column_begin<'a>(
+    unsafe extern "C-unwind" fn get_column_begin<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,
         columns: FfiSlice<&ColumnIndex>,

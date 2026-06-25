@@ -1,8 +1,11 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 
-use ecstasy_ffi::{PublisherHandle, TypeDescriptor, TypeIdentity};
+use ecstasy_ffi::{ConsumerOpaque, ProducerOpaque, TypeDescriptor, TypeIdentity};
 use reflexion::{drop_location::DropLocation, ffi_slice::FfiSlice, typeinfo::TypeInfoProvider};
 
+use crate::loader::{ConsumerLoader, ProducerLoader};
+
+// TODO: publisher and Loader can be globally loaded like other core objects.
 pub trait Event: TypeInfoProvider {
     const PATH: &'static str;
     const NAME: &'static str;
@@ -15,16 +18,28 @@ pub trait Event: TypeInfoProvider {
     };
 }
 
-pub struct Publisher<'publisher, T: Event> {
-    pub(crate) inner: PublisherHandle<'publisher>,
+pub struct Producer<'producer, T: Event> {
+    pub(crate) inner: &'producer mut ProducerOpaque,
     pub(crate) phantom: PhantomData<T>,
 }
 
-impl<'publisher, T: Event> Publisher<'publisher, T> {
+impl<'publisher, T: Event> Producer<'publisher, T> {
     pub fn emit(&mut self, mut value: T) {
         unsafe {
             let location = DropLocation::at_hard(&mut value);
-            (self.inner.vtable.push)(self.inner.handle, location);
+            ProducerLoader::push(self.inner, location);
+            mem::forget(value);
         }
+    }
+}
+
+pub struct Consumer<'consumer, T: Event> {
+    pub(crate) inner: &'consumer ConsumerOpaque,
+    pub(crate) phantom: PhantomData<T>,
+}
+
+impl<'consumer, T: Event> Consumer<'consumer, T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        unsafe { ConsumerLoader::events(self.inner).iter() }
     }
 }

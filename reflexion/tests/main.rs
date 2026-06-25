@@ -25,7 +25,7 @@ fn slice_test() {
 
 #[vtable]
 trait MovingObject {
-    extern "C" fn introduce_yourself(&self);
+    extern "C-unwind" fn introduce_yourself(&self);
 }
 
 struct Vehicle {
@@ -33,7 +33,7 @@ struct Vehicle {
 }
 
 impl MovingObject for Vehicle {
-    extern "C" fn introduce_yourself(&self) {
+    extern "C-unwind" fn introduce_yourself(&self) {
         println!("I'm a Vehicle and I got {} wheels", self.wheel_number);
     }
 }
@@ -43,7 +43,7 @@ struct SomeKindOfLeggedThingy {
 }
 
 impl MovingObject for SomeKindOfLeggedThingy {
-    extern "C" fn introduce_yourself(&self) {
+    extern "C-unwind" fn introduce_yourself(&self) {
         println!("I'm alive and I got {} legs", self.leg_number);
     }
 }

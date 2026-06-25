@@ -1,7 +1,5 @@
 use super::{ArchetypeIndex, ColumnIndex, archetype_manager::ArchetypeManager};
-use ecstasy_ffi::{
-    self, Component, ComponentMutability, LocalColumnIndex, RegistryError, TypeIdentity,
-};
+use ecstasy_ffi::{self, Component, LocalColumnIndex, RegistryError, TypeIdentity};
 use reflexion::{ffi_enum::FfiResult, ffi_slice::FfiSlice};
 use std::collections::HashMap;
 
@@ -37,14 +35,14 @@ impl QuerySet {
 }
 
 impl ecstasy_ffi::QuerySet for QuerySet {
-    extern "C" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex {
+    extern "C-unwind" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex {
         self.accessible_components
             .get(identity)
             .expect("this component isn't part of the query")
             .clone()
     }
 
-    extern "C" fn columns_index_for_archetype(
+    extern "C-unwind" fn columns_index_for_archetype(
         &self,
         archetype_index: ArchetypeIndex,
     ) -> FfiResult<FfiSlice<&ColumnIndex>, RegistryError> {

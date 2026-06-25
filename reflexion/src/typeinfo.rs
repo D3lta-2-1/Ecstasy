@@ -41,9 +41,9 @@ impl From<Layout> for std::alloc::Layout {
 #[repr(C)]
 pub struct TypeInfoImpl {
     /// For diagnostic only
-    pub name: extern "C" fn() -> FfiSlice<&'static u8>,
+    pub name: extern "C-unwind" fn() -> FfiSlice<&'static u8>,
     pub layout: Layout,
-    pub destructor: unsafe extern "C" fn(*mut u8),
+    pub destructor: unsafe extern "C-unwind" fn(*mut u8),
     pub need_drop: bool,
 }
 
@@ -78,13 +78,13 @@ impl Hash for TypeInfoImpl {
 }
 
 impl TypeInfoImpl {
-    pub unsafe extern "C" fn destructor<T>(to_drop: *mut u8) {
+    pub unsafe extern "C-unwind" fn destructor<T>(to_drop: *mut u8) {
         unsafe {
             std::ptr::drop_in_place(to_drop);
         }
     }
 
-    pub extern "C" fn name_hint<T>() -> FfiSlice<&'static u8> {
+    pub extern "C-unwind" fn name_hint<T>() -> FfiSlice<&'static u8> {
         type_name::<T>().as_bytes().into()
     }
 

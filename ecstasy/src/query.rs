@@ -1,11 +1,12 @@
-use crate::bundle::Component;
 use ecstasy_ffi::{
-    ArchetypeIndex, ColumnIndex, ComponentMutability, Entity, EntityLocation, LocalColumnIndex, QueryBuilder, QuerySetIndex, RegistryError, RegistryOpaque, TypeDescriptor
+    ArchetypeIndex, BorrowedResource, ColumnIndex, ComponentMutability, Entity, EntityLocation,
+    LocalColumnIndex, QueryBuilder, QuerySetIndex, RegistryError, RegistryOpaque, TypeDescriptor,
 };
 use reflexion::erased::ErasedMutPointer;
 
 use crate::{
-    array_utils::{Array, sort},
+    Component,
+    array_utils::Array,
     loader::{QuerySetLoader, RegistryLoader},
 };
 
@@ -36,7 +37,7 @@ impl<T: Component + 'static> ComponentRef for &mut T {
 
 pub trait QueryBundle {
     type BundleRef<'a>;
-    type Array<T: 'static>: Array<T>;
+    type Array<T: 'static + Copy>: Array<T> + Copy;
     const DESCRIPTORS: Self::Array<TypeDescriptor>; //descriptor of the value, not the refs
     const MUTABILTY: Self::Array<ComponentMutability>;
     unsafe fn build<'a>(pointers: Self::Array<ErasedMutPointer>) -> Self::BundleRef<'a>;
@@ -52,7 +53,7 @@ where
     U::Inner: Component,
 {
     type BundleRef<'a> = (T::Ref<'a>, U::Ref<'a>);
-    type Array<V: 'static> = [V; 2];
+    type Array<V: 'static + Copy> = [V; 2];
     const DESCRIPTORS: [TypeDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
     const MUTABILTY: [ComponentMutability; 2] = [T::MUTABILITY, U::MUTABILITY];
 
@@ -63,16 +64,30 @@ where
 
 pub struct QueryState<Bundle: QueryBundle> {
     pub id: QuerySetIndex,
+    borrowed_resources: Bundle::Array<BorrowedResource>,
     local_to_column_index: Bundle::Array<LocalColumnIndex>, // the ordering used here is the same the bundle fields, meaning that local_to_column_index[0] give the local column index of the first component
 }
 
 // TODO: add iterator on Queries,
 impl<Bundle: QueryBundle> QueryState<Bundle> {
     pub fn new(registry: &mut RegistryOpaque) -> Self {
-        let mut requested_components: Bundle::Array<Entity> = Bundle::DESCRIPTORS
-            .map(|descriptor| RegistryLoader::find_or_register_component(registry, &descriptor));
-        let mut mutabilities = Bundle::MUTABILTY;
-        sort(requested_components.as_mut(), mutabilities.as_mut());
+        let mut borrowed_resources =
+            <Bundle::Array<BorrowedResource>>::from_fn(|i| BorrowedResource::Component {
+                mutability: Bundle::MUTABILTY[i],
+                component: RegistryLoader::find_or_register_component(
+                    registry,
+                    &Bundle::DESCRIPTORS[i],
+                ),
+            });
+        borrowed_resources.as_mut().sort();
+        Self::ensure_query_validity(borrowed_resources.as_ref());
+
+        let requested_components: Bundle::Array<_> = borrowed_resources.map(|resource| {
+            let BorrowedResource::Component { component, .. } = resource else {
+                unreachable!()
+            };
+            component
+        });
 
         let builder = QueryBuilder {
             requested_components: requested_components.as_ref().into(),
@@ -84,8 +99,27 @@ impl<Bundle: QueryBundle> QueryState<Bundle> {
             .map(|descriptor| QuerySetLoader::get_local_column_index(query, &descriptor.identity));
         Self {
             id,
+            borrowed_resources,
             local_to_column_index: columns,
         }
+    }
+
+    pub fn ensure_query_validity(resources: &[BorrowedResource]) {
+        for pair in resources.array_windows::<2>() {
+            match pair {
+                [
+                    BorrowedResource::Component { component: a, .. },
+                    BorrowedResource::Component { component: b, .. },
+                ] => {
+                    assert_ne!(a, b, "this query contain the same component twice");
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    pub fn get_borrowed_resources(&self) -> &[BorrowedResource] {
+        self.borrowed_resources.as_ref()
     }
 
     /// return the corresponding column, properly ordered for reading, return none if the archetype isn't part of the query
