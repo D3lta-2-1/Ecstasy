@@ -1,6 +1,7 @@
 use ecstasy_ffi::{
-    ArchetypeIndex, BorrowedResource, ColumnIndex, ComponentMutability, Entity, EntityLocation,
-    LocalColumnIndex, QueryBuilder, QuerySetIndex, RegistryError, RegistryOpaque, TypeDescriptor,
+    ArchetypeIndex, BorrowedResource, ColumnIndex, ComponentDescriptor, ComponentMutability,
+    Entity, EntityLocation, LocalColumnIndex, QueryBuilder, QuerySetIndex, RegistryError,
+    RegistryOpaque,
 };
 use reflexion::erased::ErasedMutPointer;
 
@@ -38,7 +39,7 @@ impl<T: Component + 'static> ComponentRef for &mut T {
 pub trait QueryBundle {
     type BundleRef<'a>;
     type Array<T: 'static + Copy>: Array<T> + Copy;
-    const DESCRIPTORS: Self::Array<TypeDescriptor>; //descriptor of the value, not the refs
+    const DESCRIPTORS: Self::Array<ComponentDescriptor>; //descriptor of the value, not the refs
     const MUTABILTY: Self::Array<ComponentMutability>;
     unsafe fn build<'a>(pointers: Self::Array<ErasedMutPointer>) -> Self::BundleRef<'a>;
 }
@@ -54,7 +55,7 @@ where
 {
     type BundleRef<'a> = (T::Ref<'a>, U::Ref<'a>);
     type Array<V: 'static + Copy> = [V; 2];
-    const DESCRIPTORS: [TypeDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
+    const DESCRIPTORS: [ComponentDescriptor; 2] = [T::Inner::DESCRIPTOR, U::Inner::DESCRIPTOR];
     const MUTABILTY: [ComponentMutability; 2] = [T::MUTABILITY, U::MUTABILITY];
 
     unsafe fn build<'a>([u, v]: [ErasedMutPointer; 2]) -> Self::BundleRef<'a> {

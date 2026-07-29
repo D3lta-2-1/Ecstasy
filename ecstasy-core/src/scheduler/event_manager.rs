@@ -1,7 +1,8 @@
 use std::{cell::UnsafeCell, collections::HashMap};
 
 use ecstasy_ffi::{
-    self, ConsumerOpaque, ConsumerVtable, ConsumerVtableExt, EventIndex, ProducerOpaque, ProducerVtable, ProducerVtableExt, TypeDescriptor, TypeIdentity
+    self, ComponentDescriptor, ConsumerOpaque, ConsumerVtable, ConsumerVtableExt, EventIndex,
+    ProducerOpaque, ProducerVtable, ProducerVtableExt, TypeIdentity,
 };
 use reflexion::{drop_location::DropLocation, erased::ErasedMutPointer, typeinfo::TypeInfo};
 
@@ -20,7 +21,7 @@ impl EventManager {
         }
     }
 
-    pub fn find_event(&mut self, descriptor: TypeDescriptor) -> EventIndex {
+    pub fn find_event(&mut self, descriptor: ComponentDescriptor) -> EventIndex {
         let v = self.map.entry(descriptor.identity).or_insert_with(|| {
             self.events
                 .push(UnsafeCell::new(EreasedVec::new(descriptor.type_info)))

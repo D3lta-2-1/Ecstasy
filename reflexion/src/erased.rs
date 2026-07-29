@@ -191,7 +191,7 @@ impl<PTR: ZeroSized> ErasedMutPointer<PTR> {
         }
     }
 
-    pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer<PTR>) {
+    pub unsafe fn copy_nonoverlapping_from(&self, source: ErasedMutPointer<PTR>, len: usize) {
         let Some(type_info) = self.type_info else {
             panic!("type info doesn't exist")
         };
@@ -204,7 +204,7 @@ impl<PTR: ZeroSized> ErasedMutPointer<PTR> {
             std::ptr::copy_nonoverlapping(
                 source.data.as_ptr(),
                 self.data.as_ptr(),
-                type_info.layout.size,
+                type_info.layout.size * len,
             );
         }
     }
@@ -235,8 +235,9 @@ impl<PTR: ZeroSized> ErasedMutPointer<PTR> {
         }
     }
 
+    /// move the content from a drop location and discard it
     pub unsafe fn write_drop_location(self, location: DropLocation<PTR>) {
-        unsafe { self.copy_nonoverlapping_from(location.location) }
+        unsafe { self.copy_nonoverlapping_from(location.location, 1) }
         mem::forget(location);
     }
 

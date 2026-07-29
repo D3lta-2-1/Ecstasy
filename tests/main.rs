@@ -5,7 +5,7 @@ use ecstasy::{
     query::QueryState,
 };
 use ecstasy_ffi::{
-    Entity, QuerySetVtableExt, RegistryVtableExt, SchedulerBuilderVtableExt, SystemContextVtableExt,
+    QuerySetVtableExt, RegistryVtableExt, SchedulerBuilderVtableExt, SystemContextVtableExt,
 };
 
 use ecstasy_core::{
@@ -22,6 +22,7 @@ struct Pos {
 impl Component for Pos {
     const PATH: &'static str = "test";
     const NAME: &'static str = "pos";
+    const VERSIONED: bool = true;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

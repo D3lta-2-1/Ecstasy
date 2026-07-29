@@ -1,10 +1,10 @@
 use std::sync::OnceLock;
 
 use ecstasy_ffi::{
-    ArchetypeIndex, ColumnIndex, Component, ConsumerOpaque, ConsumerVtable, Entity, EntityLocation,
-    EventIndex, LocalColumnIndex, ProducerOpaque, ProducerVtable, QueryBuilder, QuerySetIndex,
-    QuerySetOpaque, QuerySetVtable, RegistryError, RegistryOpaque, RegistryVtable,
-    SystemContextVtable, TypeDescriptor, TypeIdentity,
+    ArchetypeIndex, ColumnIndex, Component, ComponentDescriptor, ConsumerOpaque, ConsumerVtable,
+    Entity, EntityLocation, EventIndex, LocalColumnIndex, ProducerOpaque, ProducerVtable,
+    QueryBuilder, QuerySetIndex, QuerySetOpaque, QuerySetVtable, RegistryError, RegistryOpaque,
+    RegistryVtable, SystemContextVtable, TypeIdentity,
 };
 use reflexion::{
     drop_location::DropLocation,
@@ -59,7 +59,7 @@ impl RegistryLoader {
 
     pub fn find_or_register_component(
         opaque: &mut RegistryOpaque,
-        component: &TypeDescriptor,
+        component: &ComponentDescriptor,
     ) -> Component {
         (Self::get().find_or_register_component)(opaque, component)
     }
@@ -119,6 +119,10 @@ impl RegistryLoader {
                 .into()
         }
     }
+
+    pub fn tick(opaque: &mut RegistryOpaque) {
+        (Self::get().tick)(opaque)
+    }
 }
 
 impl QuerySetLoader {
@@ -155,7 +159,10 @@ impl SchedulerBuilderLoader {
         (Self::get().registry)(opaque)
     }
 
-    pub fn find_event(opaque: &mut SchedulerBuilderOpaque, event: TypeDescriptor) -> EventIndex {
+    pub fn find_event(
+        opaque: &mut SchedulerBuilderOpaque,
+        event: ComponentDescriptor,
+    ) -> EventIndex {
         (Self::get().find_event)(opaque, event)
     }
 

@@ -6,16 +6,19 @@ use super::{
     query_manager::QueryManager,
 };
 
-use crate::{index_storage::IndexStorage, merge_iter::MergeIter};
+use crate::{index_storage::IndexStorage, merge_iter::MergeIter, registry::archetype::PushEntry};
 
 use ecstasy_ffi::{
-    Component, Entity, LocalColumnIndex, RegistryError, TypeDescriptor, TypeIdentity,
+    Component, ComponentDescriptor, Entity, LocalColumnIndex, RegistryError, TypeIdentity,
 };
 use reflexion::{
     drop_location::DropLocation,
     erased::{ErasedMutPointer, ErasedRef},
 };
-use std::{collections::HashMap, iter::zip};
+use std::{
+    collections::HashMap,
+    iter::{Empty, zip},
+};
 
 // releasing archetype can be very challenging, for now, they never get freed
 pub struct ArchetypeManager {
@@ -29,29 +32,45 @@ pub struct ArchetypeManager {
     component_location: HashMap<Component, HashMap<ArchetypeIndex, ColumnIndex>>,
     // mapping between component type and id
     component_bridge: ComponentIdentityBridge,
+    // amount of copies for versioned components
+    versioning_count: usize,
+    // archetypes that requires to be ticked
+    active_archetype: Vec<ArchetypeIndex>,
+    // current tick
+    tick: u64,
 }
 
 impl ArchetypeManager {
     pub const NO_COMPONENT_ARCHETYPE: ArchetypeIndex = ArchetypeIndex(0);
 
-    pub fn new() -> Self {
+    pub fn new(versioning_count: usize) -> Self {
         let component_bridge = ComponentIdentityBridge::default();
         let components_set_to_archetype = HashMap::from([
             (vec![], Self::NO_COMPONENT_ARCHETYPE), // no component archetype
         ]);
 
         let mut archetypes = IndexStorage::default();
-        archetypes.push(Archetype::new(vec![], &component_bridge));
+        archetypes.push(Archetype::new(vec![], &component_bridge, versioning_count));
         Self {
             archetypes,
             components_set_to_archetype,
             component_location: Default::default(),
             component_bridge,
+            versioning_count,
+            active_archetype: Vec::new(),
+            tick: 0,
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.tick += 1;
+        for index in &self.active_archetype {
+            self.archetypes[*index].tick(self.tick);
         }
     }
 
     /// create a new link between a ``ComponentDescriptor`` and an ``Entity``
-    pub fn add_new_component_mapping(&mut self, component: TypeDescriptor, entity: Entity) {
+    pub fn add_new_component_mapping(&mut self, component: ComponentDescriptor, entity: Entity) {
         self.component_bridge.add(component, entity);
     }
 
@@ -68,7 +87,10 @@ impl ArchetypeManager {
         components: impl Iterator<Item = (Component, DropLocation<'a>)>,
     ) -> EntityLocation {
         let entity_index = self.archetypes[archetype_index]
-            .push(entity, components)
+            .push(
+                entity,
+                components.map(|(component, value)| (component, PushEntry::<Empty<_>>::One(value))),
+            )
             .expect("insertion failed");
         EntityLocation {
             archetype_index,
@@ -93,12 +115,13 @@ impl ArchetypeManager {
             .get(&component)
             .ok_or(RegistryError::EntityNotFound)?;
         let column = map.get(&archetype_index).expect("internal error").clone();
-        Ok(
-            self.archetypes[archetype_index].ref_at(ComponentValueLocation {
+        Ok(self.archetypes[archetype_index].ref_at(
+            ComponentValueLocation {
                 column,
                 entity_index,
-            }),
-        )
+            },
+            self.tick,
+        ))
     }
 
     /// write an iterator at a given location, the archetype must already have an initialized component
@@ -121,10 +144,13 @@ impl ArchetypeManager {
                 .get(&archetype_index)
                 .expect("archetype not found");
             archetype
-                .mut_at(ComponentValueLocation {
-                    column,
-                    entity_index,
-                })
+                .mut_at(
+                    ComponentValueLocation {
+                        column,
+                        entity_index,
+                    },
+                    self.tick,
+                )
                 .write(value);
         }
     }
@@ -140,8 +166,18 @@ impl ArchetypeManager {
         if let Some(index) = archetype_index {
             return *index;
         }
-        let new_archetype = Archetype::new(components.clone(), &self.component_bridge);
+        let new_archetype = Archetype::new(
+            components.clone(),
+            &self.component_bridge,
+            self.versioning_count,
+        );
+
+        let active = new_archetype.is_versioned();
+
         let archetype_index = self.archetypes.push(new_archetype);
+        if active {
+            self.active_archetype.push(archetype_index);
+        }
 
         for (i, component) in components.iter().enumerate() {
             self.component_location
@@ -191,7 +227,10 @@ impl ArchetypeManager {
             .expect("src and target archetype are the same");
 
         let actual_values = src_archetype.swap_remove(src_location.entity_index);
-        let new_value_iter = zip(components.iter().cloned(), values);
+        let new_value_iter = zip(
+            components.iter().cloned(),
+            values.map(|value| PushEntry::One(value)),
+        );
         let moved_entity = actual_values.moved_entity();
 
         let values =
@@ -285,6 +324,6 @@ impl ArchetypeManager {
         columns: &[ColumnIndex],
         starts: &mut [ErasedMutPointer],
     ) -> &[Entity] {
-        unsafe { self.archetypes[archetype_index].get_column_begin(columns, starts) }
+        unsafe { self.archetypes[archetype_index].get_column_begin(self.tick, columns, starts) }
     }
 }

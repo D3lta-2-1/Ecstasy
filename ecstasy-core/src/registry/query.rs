@@ -35,7 +35,10 @@ impl QuerySet {
 }
 
 impl ecstasy_ffi::QuerySet for QuerySet {
-    extern "C-unwind" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex {
+    extern "C-unwind" fn get_local_column_index(
+        &self,
+        identity: &TypeIdentity,
+    ) -> LocalColumnIndex {
         self.accessible_components
             .get(identity)
             .expect("this component isn't part of the query")

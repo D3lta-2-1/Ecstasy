@@ -2,27 +2,29 @@ use paste::paste;
 use reflexion::{drop_location::DropLocation, ffi_slice::FfiSlice, typeinfo::TypeInfoProvider};
 use std::mem;
 
-use ecstasy_ffi::{TypeDescriptor, TypeIdentity};
+use ecstasy_ffi::{ComponentDescriptor, TypeIdentity};
 
 pub trait Component: TypeInfoProvider {
     const PATH: &'static str;
     const NAME: &'static str;
-    const DESCRIPTOR: TypeDescriptor = TypeDescriptor {
+    const VERSIONED: bool = false;
+    const DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
         identity: TypeIdentity {
             path: FfiSlice::from_str(Self::PATH),
             name: FfiSlice::from_str(Self::NAME),
         },
         type_info: Self::TYPE_INFO,
+        versioned: Self::VERSIONED,
     };
 }
 
 pub trait StaticBundle<const SIZE: usize> {
-    const DESCRIPTORS: [TypeDescriptor; SIZE];
+    const DESCRIPTORS: [ComponentDescriptor; SIZE];
     fn read<T>(self, reader: impl FnOnce([DropLocation; SIZE]) -> T) -> T;
 }
 
 impl<T: Component> StaticBundle<1> for T {
-    const DESCRIPTORS: [TypeDescriptor; 1] = [T::DESCRIPTOR];
+    const DESCRIPTORS: [ComponentDescriptor; 1] = [T::DESCRIPTOR];
 
     fn read<RETURN>(mut self, reader: impl FnOnce([DropLocation; 1]) -> RETURN) -> RETURN {
         let locations = unsafe { [DropLocation::at_hard(&mut self)] };
@@ -40,7 +42,7 @@ macro_rules! impl_bundle {
     ($($T:tt)+) => {
         paste! {
             impl<$($T : Component,)+> StaticBundle<{ count_tts!($($T)+) }> for ($($T,)+) {
-                const DESCRIPTORS: [TypeDescriptor; count_tts!($($T)+)] = [ $($T::DESCRIPTOR,)+ ];
+                const DESCRIPTORS: [ComponentDescriptor; count_tts!($($T)+)] = [ $($T::DESCRIPTOR,)+ ];
                 fn read<RETURN>(self, reader: impl FnOnce([DropLocation; count_tts!($($T)+)]) -> RETURN) -> RETURN {
                     let ($(mut [<$T:lower>],)+) = self;
                     let locations = unsafe { [

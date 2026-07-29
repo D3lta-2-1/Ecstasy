@@ -2,9 +2,9 @@ mod event_manager;
 mod solver;
 
 use ecstasy_ffi::{
-    BorrowedResource, ConsumerOpaque, EventIndex, ProducerOpaque, RegistryOpaque,
-    RegistryVtableExt, SystemContextOpaque, SystemContextVtableExt, SystemOpaque, SystemVtable,
-    TypeDescriptor,
+    BorrowedResource, ComponentDescriptor, ConsumerOpaque, EventIndex, ProducerOpaque,
+    RegistryOpaque, RegistryVtableExt, SystemContextOpaque, SystemContextVtableExt, SystemOpaque,
+    SystemVtable,
 };
 use reflexion::drop_location::DropLocation;
 
@@ -66,7 +66,7 @@ impl ecstasy_ffi::SchedulerBuilder for SchedulerBuilder {
         self.registry.as_opaque_mut()
     }
 
-    extern "C-unwind" fn find_event(&mut self, event: TypeDescriptor) -> EventIndex {
+    extern "C-unwind" fn find_event(&mut self, event: ComponentDescriptor) -> EventIndex {
         self.event_manager.find_event(event)
     }
 
@@ -106,6 +106,7 @@ impl Scheduler {
     /// - call system in a deterministic order, and following ordering constraint induced by event manager.
     pub fn tick(&mut self) {
         self.context.event_manager.clear();
+        self.context.registry.tick();
         for i in self.system_order.iter() {
             self.system[*i].call(self.context.as_opaque());
         }

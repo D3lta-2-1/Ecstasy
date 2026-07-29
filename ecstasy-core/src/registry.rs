@@ -13,8 +13,8 @@ use query_manager::QueryManager;
 use reflexion::erased::{ErasedMutPointer, ErasedRef};
 
 use ecstasy_ffi::{
-    self, Component, Entity, QueryBuilder, QuerySetOpaque, QuerySetVtableExt, RegistryError,
-    TypeDescriptor, TypeIdentity,
+    self, Component, ComponentDescriptor, Entity, QueryBuilder, QuerySetOpaque, QuerySetVtableExt,
+    RegistryError, TypeIdentity,
 };
 pub use ecstasy_ffi::{
     ArchetypeIndex, ColumnIndex, EntityIndex, EntityLocation, LocalColumnIndex, QuerySetIndex,
@@ -46,7 +46,7 @@ impl Registry {
     pub fn new() -> Self {
         Registry {
             entities: EntityManager::default(),
-            archetypes: ArchetypeManager::new(),
+            archetypes: ArchetypeManager::new(15), // TODO: make this configurable
             queries: QueryManager::default(),
         }
     }
@@ -93,6 +93,10 @@ impl Registry {
                 zip(components.iter().cloned(), values),
             )
         })
+    }
+
+    pub fn tick(&mut self) {
+        self.archetypes.tick();
     }
 
     pub fn add_components<'s: 'a, 'a>(
@@ -169,7 +173,10 @@ impl Registry {
 use reflexion::{ffi_collection::FfiCollectionIter, ffi_enum::FfiResult, ffi_slice::FfiSlice};
 
 impl ecstasy_ffi::Registry for Registry {
-    extern "C-unwind" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component {
+    extern "C-unwind" fn find_or_register_component(
+        &mut self,
+        component: &ComponentDescriptor,
+    ) -> Component {
         if let Some(e) = self.archetypes.find_component(&component.identity) {
             e
         } else {
@@ -209,7 +216,10 @@ impl ecstasy_ffi::Registry for Registry {
         self.get_one_component(entity, identity).into()
     }
 
-    extern "C-unwind" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError> {
+    extern "C-unwind" fn location(
+        &self,
+        entity: Entity,
+    ) -> FfiResult<EntityLocation, RegistryError> {
         self.location(entity).into()
     }
 
@@ -235,5 +245,9 @@ impl ecstasy_ffi::Registry for Registry {
                 .get_column_begin(archetype_index, columns.into(), starts.into())
                 .into()
         }
+    }
+
+    extern "C-unwind" fn tick(&mut self) {
+        self.tick();
     }
 }

@@ -1,7 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, VecDeque},
-};
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use ecstasy_ffi::{BorrowedResource, ComponentMutability, EventUsage};
 

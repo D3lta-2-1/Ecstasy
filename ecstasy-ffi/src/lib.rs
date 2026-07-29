@@ -141,9 +141,10 @@ impl TypeIdentity {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub struct TypeDescriptor {
+pub struct ComponentDescriptor {
     pub identity: TypeIdentity,
     pub type_info: TypeInfo,
+    pub versioned: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -157,7 +158,10 @@ pub enum RegistryError {
 #[vtable]
 pub trait Registry {
     /// Find the Entity that represent a given component
-    extern "C-unwind" fn find_or_register_component(&mut self, component: &TypeDescriptor) -> Component;
+    extern "C-unwind" fn find_or_register_component(
+        &mut self,
+        component: &ComponentDescriptor,
+    ) -> Component;
     /// Create a new Entity id, the new entity can be queried in empty queries.
     extern "C-unwind" fn create_empty_entity(&mut self) -> Entity;
     extern "C-unwind" fn create_entity<'a>(
@@ -178,7 +182,12 @@ pub trait Registry {
         entity: Entity,
         identity: TypeIdentity,
     ) -> FfiResult<ErasedRef<'_>, RegistryError>;
-    extern "C-unwind" fn location(&self, entity: Entity) -> FfiResult<EntityLocation, RegistryError>;
+    extern "C-unwind" fn location(
+        &self,
+        entity: Entity,
+    ) -> FfiResult<EntityLocation, RegistryError>;
+
+    extern "C-unwind" fn tick(&mut self);
 
     /// this function will return the query ID associated with this builder, and create if required
     /// Queries can't be deleted, they are meant to be used through systems
@@ -203,7 +212,8 @@ pub trait Registry {
 #[vtable]
 pub trait QuerySet {
     /// return the ``LocalColumnIndex`` of a Component, panic if it doesn't belong to the query
-    extern "C-unwind" fn get_local_column_index(&self, identity: &TypeIdentity) -> LocalColumnIndex;
+    extern "C-unwind" fn get_local_column_index(&self, identity: &TypeIdentity)
+    -> LocalColumnIndex;
     /// return an array that map the LocalColumnIndex to the real column in a given Archetype.
     extern "C-unwind" fn columns_index_for_archetype(
         &self,
@@ -299,7 +309,7 @@ impl PartialOrd for BorrowedResource {
 pub trait SchedulerBuilder {
     /// mainly used to during system creation
     extern "C-unwind" fn registry(&mut self) -> &mut RegistryOpaque;
-    extern "C-unwind" fn find_event(&mut self, event: TypeDescriptor) -> EventIndex;
+    extern "C-unwind" fn find_event(&mut self, event: ComponentDescriptor) -> EventIndex;
     extern "C-unwind" fn add_system(
         &mut self,
         system: DropLocation<SystemOpaque>,

@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, mem};
 
-use ecstasy_ffi::{ConsumerOpaque, ProducerOpaque, TypeDescriptor, TypeIdentity};
+use ecstasy_ffi::{ComponentDescriptor, ConsumerOpaque, ProducerOpaque, TypeIdentity};
 use reflexion::{drop_location::DropLocation, ffi_slice::FfiSlice, typeinfo::TypeInfoProvider};
 
 use crate::loader::{ConsumerLoader, ProducerLoader};
@@ -9,12 +9,13 @@ use crate::loader::{ConsumerLoader, ProducerLoader};
 pub trait Event: TypeInfoProvider {
     const PATH: &'static str;
     const NAME: &'static str;
-    const DESCRIPTOR: TypeDescriptor = TypeDescriptor {
+    const DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
         identity: TypeIdentity {
             path: FfiSlice::from_str(Self::PATH),
             name: FfiSlice::from_str(Self::NAME),
         },
         type_info: Self::TYPE_INFO,
+        versioned: false,
     };
 }
 
